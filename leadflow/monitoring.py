@@ -106,7 +106,7 @@ def record_failure(
         )
     else:
         open_review(db, "api_error", f"{err.service}.{err.operation} failed: {err.message}", lead_id, {"task": task, **payload})
-        services.alerts.send(f"Leadflow: {err.service}.{err.operation} failed for lead {lead_id}: {err.message}")
+        services.alerts.send(f"Leadflow: falló {err.service}.{err.operation} (lead {lead_id}): {err.message}")
 
 
 def reconcile(db: Session, now: datetime | None = None) -> dict[str, int]:

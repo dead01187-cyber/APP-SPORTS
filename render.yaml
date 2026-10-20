@@ -1,0 +1,40 @@
+# Render Blueprint: crea el servidor web + la base de datos PostgreSQL.
+# En Render: New → Blueprint → elija este repositorio.
+services:
+  - type: web
+    name: leadflow
+    runtime: docker
+    plan: starter            # no use "free": se duerme y no recibe los SMS a tiempo
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: leadflow-db
+          property: connectionString
+      - key: API_KEY
+        generateValue: true  # Render inventa una clave segura; cópiela para Zapier
+      - key: DRY_RUN
+        value: "true"        # cambie a "false" cuando todo esté verificado
+      - key: SCHEDULER_ENABLED
+        value: "true"
+      - key: AGENT_NAME
+        sync: false
+      - key: AGENT_PHONE
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: LOFTY_API_KEY
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM_NUMBER
+        sync: false
+      - key: ALERT_WEBHOOK_URL
+        sync: false
+
+databases:
+  - name: leadflow-db
+    databaseName: leadflow
+    user: leadflow

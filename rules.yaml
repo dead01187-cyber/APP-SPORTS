@@ -16,10 +16,15 @@ prospecting:
 lofty:
   source: Propwire
   tags: [Propwire]
-  pond: "Daniel R-N"
-  level: Company
-  call_and_text: true
-  assigned_agent: null
+  pond_name: "Daniel R-N"
+  # Lofty asigna el pond por número. Ábralo en Lofty y copie el número (pondId).
+  pond_id: null
+  # Tipo de lead. En la cuenta revisada, 1 = Buyer. Confirme el número de "Seller" antes de usarlo.
+  lead_types: []
+  # Nivel de propiedad del lead (Level). La cuenta conectada en Zapier solo ofrece Personal.
+  ownership_scope: null        # PERSONAL | TEAM | COMPANY
+  call_and_text: true          # Call & Text: Yes
+  assigned_user_id: null       # null = queda en el pond
 
 # 2 · Contacto
 contact:
@@ -69,6 +74,17 @@ cma:
   sellers_only: true
   language: null           # "es" = solo leads en español (Tag Spanish: ES)
   follow_up_days: 3        # llamar N días después de enviar el CMA
+
+# Programador interno (se activa con SCHEDULER_ENABLED=true). Horas locales.
+scheduler:
+  jobs_every_minutes: 15           # seguimientos, CMAs y reintentos
+  campaign_enabled: true           # mensajes iniciales automáticos
+  campaign_time: "10:00"
+  campaign_days: [mon, tue, wed, thu, fri]
+  campaign_mode: sms
+  reconcile_time: "03:00"          # conciliación diaria con Lofty
+  weekly_report_day: mon           # reporte semanal a ALERT_WEBHOOK_URL (null = no enviar)
+  weekly_report_time: "08:00"
 
 tags:
   spanish: ES

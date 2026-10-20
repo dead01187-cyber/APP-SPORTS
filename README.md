@@ -1,8 +1,9 @@
 # Leadflow: automatización de leads inmobiliarios
 
 Servicio que implementa el diagrama de arquitectura:
-**Propwire → BeenVerified → Lofty → SMS + Claude → CMA**, con Zapier como motor
-que conecta todo y dispara cada paso.
+**Propwire → BeenVerified → Lofty → SMS + Claude → CMA**.
+Zapier trae los CSV de Propwire y entrega las alertas; el resto (seguimientos, campañas,
+reintentos, conciliación y reporte semanal) lo programa el propio servidor.
 
 ```
 Propwire (CSV) ──► 1 · Prospección ──► Lofty (leads limpios, etiquetados)
@@ -26,8 +27,9 @@ Propwire (CSV) ──► 1 · Prospección ──► Lofty (leads limpios, etiqu
 | Database (PostgreSQL): leads, historial, duplicados, trabajos de seguimiento, auditoría | `leadflow/models.py` |
 | Rules & Decision Logic | `rules.yaml` (editable sin programar) |
 | Monitoring & Error Handling: errores de API, reintentos, log, alertas, conciliación, cola de revisión manual | `leadflow/monitoring.py`, `leadflow/jobs.py` |
-| Reports & Analytics | `leadflow/reports.py` → `GET /reports/summary` |
-| Zapier | `docs/zapier.md` (paso a paso de cada Zap) |
+| Reports & Analytics | `leadflow/reports.py` → `GET /reports/summary` + reporte semanal por alerta |
+| Horarios (seguimientos, campaña diaria, conciliación) | `leadflow/scheduler.py`, `rules.yaml` → `scheduler` |
+| Zapier (2 Zaps: importar CSV y alertas) | `docs/zapier.md` |
 
 ## Cómo se decide cada respuesta
 
@@ -62,14 +64,17 @@ uvicorn leadflow.api:app --reload
 
 Abra http://localhost:8000/docs para ver y probar todos los endpoints.
 
-### Producción con Docker
+### Producción en Render (recomendado)
+
+Siga `docs/render.md`: **New → Blueprint** con este repositorio crea el servidor y la base de datos
+usando `render.yaml`. Después, `docs/zapier.md` para los 2 Zaps.
+
+### Producción con Docker (servidor propio)
 
 ```bash
-cp .env.example .env   # complete las claves y ponga DRY_RUN=false
+cp .env.example .env   # complete las claves, SCHEDULER_ENABLED=true, DRY_RUN=false
 docker compose up -d --build
 ```
-
-Necesita una URL pública (Render, Railway, Fly.io, un VPS…) para que Zapier y Twilio puedan llamar al servicio.
 
 ### Variables principales (`.env`)
 
@@ -82,7 +87,8 @@ Necesita una URL pública (Render, Railway, Fly.io, un VPS…) para que Zapier y
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` | Envío y recepción de SMS |
 | `BEENVERIFIED_API_KEY`, `BEENVERIFIED_API_URL` | Enriquecimiento (opcional) |
 | `ALERT_WEBHOOK_URL` | Alertas a Slack o a un Zap que envíe email |
-| `PUBLIC_BASE_URL` | URL pública, para validar firmas de Twilio |
+| `PUBLIC_BASE_URL` | URL pública, para validar firmas de Twilio (en Render se detecta sola) |
+| `SCHEDULER_ENABLED` | `true` = el servidor programa seguimientos, campañas, conciliación y reporte |
 | `DRY_RUN` | `true` para probar sin enviar nada |
 
 ## Endpoints
@@ -111,7 +117,7 @@ Todos piden el encabezado `X-API-Key`, salvo `/health` (y los webhooks firmados 
 ## Pruebas
 
 ```bash
-pytest                                   # 59 pruebas, SQLite en memoria
+pytest                                   # 65 pruebas, SQLite en memoria
 TEST_DATABASE_URL=postgresql+psycopg://usuario@localhost/leadflow_test pytest   # mismas pruebas en PostgreSQL
 ```
 
@@ -121,15 +127,18 @@ Las pruebas reemplazan Lofty, Twilio, BeenVerified y Claude por versiones falsas
 
 Estos puntos están marcados como *Pending setup* en el diagrama o dependen de su cuenta:
 
-1. **API de Lofty.** Las rutas y nombres de campos están en un solo lugar
-   (`LoftyClient.PATHS` y `lead_payload()` en `leadflow/integrations/lofty.py`).
-   Verifíquelos contra la documentación de su cuenta en developer.lofty.com antes de activar `DRY_RUN=false`.
+1. **API de Lofty.** El formato de leads se revisó contra la cuenta real (solo lectura): campos,
+   teléfonos de 10 dígitos, `pondId`, `cannotText`/`cannotCall`, y la ruta `/notes`.
+   Falta probar una escritura real (crear un lead de prueba) antes de activar `DRY_RUN=false`.
+   En `rules.yaml` → `lofty`, ponga el `pond_id` del pond "Daniel R-N" y, si quiere, el número de tipo "Seller".
 2. **CMA por API.** Si su plan de Lofty no permite crear CMAs por API, el sistema
    lo detecta, pone el lead en la cola de revisión (`cma_manual`) y usted envía el link con `POST /cma/{id}/link`.
 3. **BeenVerified.** No tiene una API pública estándar. El cliente envía nombre + dirección a
    `BEENVERIFIED_API_URL`; ajuste `parse_response()` a la respuesta de su cuenta, o déjelo vacío y el paso se omite.
 4. **Propwire** entra por CSV exportado (o filas enviadas desde Zapier). Las columnas se reconocen por nombre
    (`leadflow/normalize.py` → `FIELD_ALIASES`); agregue alias si su exportación usa otros encabezados.
-5. **Cumplimiento (TCPA / DNC).** El sistema respeta STOP, horario permitido y su propia lista DNC, pero
+5. **Twilio A2P 10DLC.** En EE. UU. hay que registrar la marca y la campaña en Twilio para enviar SMS
+   desde números normales; sin ese registro los mensajes se bloquean.
+6. **Cumplimiento (TCPA / DNC).** El sistema respeta STOP, horario permitido y su propia lista DNC, pero
    **no** consulta el Registro Nacional No Llame. Enviar SMS de marketing a números obtenidos de listas
    puede requerir consentimiento previo; confirme sus obligaciones con un abogado antes de enviar en volumen.

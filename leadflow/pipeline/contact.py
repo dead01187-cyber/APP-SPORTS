@@ -108,8 +108,8 @@ def render(services: Services, lead: Lead, name: str, **extra: Any) -> str:
 
 
 def status_callback_url(services: Services) -> str | None:
-    base = services.settings.public_base_url
-    return f"{base.rstrip('/')}/webhooks/sms/status" if base else None
+    base = services.settings.base_url
+    return f"{base}/webhooks/sms/status" if base else None
 
 
 def send_sms(db: Session, services: Services, lead: Lead, phone: LeadPhone, body: str, kind: str) -> Message:
@@ -436,13 +436,13 @@ def apply_classification(
         if rules.cma.auto_run:
             enqueue_job(db, "cma", lead_id=lead.id, run_at=now)
             decision["cma_queued"] = True
-        services.alerts.send(f"Hot seller: {lead.owner_name}, {lead.property_address} - “{text}”")
+        services.alerts.send(f"Vendedor interesado: {lead.owner_name}, {lead.property_address}. Respondió: “{text}”")
     elif action.next == "notify_agent":
         if category == "interested_buying":
             lead.intent = lead.intent or "buying"
         open_review(db, "hot_lead", f"{lead.owner_name} ({category}): “{text}”", lead.id,
                     {"suggested_reply": cls.suggested_reply, "summary": cls.summary})
-        services.alerts.send(f"Hot lead ({category}): {lead.owner_name} - “{text}”")
+        services.alerts.send(f"Lead caliente ({category}): {lead.owner_name}. Respondió: “{text}”")
     elif action.next == "review":
         open_review(db, "reply_review", f"{lead.owner_name} ({category}): “{text}”", lead.id,
                     {"model_category": cls.category, "confidence": cls.confidence,

@@ -119,3 +119,24 @@ def test_server_without_api_key_refuses_requests(settings, services):
     settings.api_key = ""
     client = TestClient(create_app(settings, services))
     assert client.post("/jobs/run-due", headers=KEY).status_code == 503
+
+
+def test_health_reports_scheduler_state(client):
+    assert client.get("/health").json()["scheduler"] == "off"
+
+
+def test_postgres_urls_from_hosting_providers_are_normalized():
+    from leadflow.db import normalize_url
+
+    assert normalize_url("postgres://u:p@h:5432/d") == "postgresql+psycopg://u:p@h:5432/d"
+    assert normalize_url("postgresql://u:p@h/d") == "postgresql+psycopg://u:p@h/d"
+    assert normalize_url("sqlite://") == "sqlite://"
+
+
+def test_csv_upload_as_multipart_file_and_excel_guard(client):
+    files = {"file": ("propwire.csv", CSV.encode(), "text/csv")}
+    result = client.post("/prospecting/import-csv", files=files, headers=KEY).json()
+    assert result["created"] == 2
+
+    xlsx = client.post("/prospecting/import-csv", content=b"PK\x03\x04junk", headers=KEY)
+    assert xlsx.status_code == 422 and "CSV" in xlsx.json()["detail"]

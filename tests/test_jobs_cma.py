@@ -134,7 +134,7 @@ def test_retry_backs_off_then_fails_into_review_and_alert(db, services, make_lea
     assert delays == [60, 300, 1800, 7200]
     assert job.status == "failed" and job.attempts == 5
     assert reviews(db, "failed_job")[0].lead_id == lead.id
-    assert any("failed" in a for a in services.alerts.sent)
+    assert any("falló" in a for a in services.alerts.sent)
 
     services.lofty.fail_upsert = None  # Lofty is back: the next import works normally
     assert lead.lofty_lead_id is None

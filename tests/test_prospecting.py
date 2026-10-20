@@ -15,9 +15,17 @@ def test_import_creates_leads_and_syncs_to_lofty(db, services):
     leads = db.scalars(select(Lead).order_by(Lead.id)).all()
     assert all(lead.status == LeadStatus.IMPORTED and lead.lofty_lead_id for lead in leads)
     payload = services.lofty.payloads[leads[0].lofty_lead_id]
-    assert payload["pond"] == "Daniel R-N" and payload["level"] == "Company"
     assert payload["tags"] == ["Propwire"] and payload["source"] == "Propwire"
-    assert payload["phones"] == ["+12134821234"]
+    assert payload["phones"] == ["2134821234"]  # Lofty format
+    assert payload["cannotText"] is False and payload["cannotCall"] is False
+    assert payload["leadPropertyList"][0]["streetAddress"] == "123 Main Street"
+    assert "pondId" not in payload  # not configured yet
+
+    services.rules.lofty.pond_id = 4242
+    services.rules.lofty.lead_types = [2]
+    from leadflow.integrations.lofty import LoftyClient
+    configured = LoftyClient.lead_payload(leads[0], services.rules.lofty)
+    assert configured["pondId"] == 4242 and configured["leadTypes"] == [2]
     assert "ES" in leads[1].tags and leads[1].language == "es"
 
 

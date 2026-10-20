@@ -176,7 +176,7 @@ def fail_job(db: Session, services: Services, job: Job, error: str) -> None:
     job.last_error = error
     open_review(db, "failed_job", f"Job {job.type} #{job.id} failed after {job.attempts} attempt(s): {error}",
                 job.lead_id, {"job_id": job.id, "type": job.type, "payload": job.payload})
-    services.alerts.send(f"Leadflow job {job.type} #{job.id} failed (lead {job.lead_id}): {error}")
+    services.alerts.send(f"Leadflow: el trabajo {job.type} #{job.id} falló (lead {job.lead_id}): {error}")
 
 
 def run_due_jobs(db: Session, services: Services, now: datetime | None = None, limit: int = 100) -> dict[str, Any]:

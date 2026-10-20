@@ -6,12 +6,14 @@ from __future__ import annotations
 import hmac
 import logging
 from collections.abc import Iterator
+from contextlib import asynccontextmanager
 from typing import Any, Literal
 from urllib.parse import parse_qsl
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
+from starlette.datastructures import UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -24,6 +26,7 @@ from .normalize import normalize_phone, parse_csv
 from .pipeline import cma as cma_step
 from .pipeline import contact
 from .pipeline.prospecting import ingest_rows
+from .scheduler import SchedulerThread
 from .services import Services, build_services
 from .timeutil import utcnow
 
@@ -117,7 +120,20 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     session_factory = make_sessionmaker(engine)
     svc = services or build_services(settings)
 
-    app = FastAPI(title="Leadflow", version="0.1.0", description="Propwire → BeenVerified → Lofty → SMS + Claude → CMA")
+    scheduler = SchedulerThread(session_factory, svc) if settings.scheduler_enabled else None
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        if scheduler:
+            scheduler.start()
+        yield
+        if scheduler:
+            scheduler.stop()
+
+    app = FastAPI(
+        title="Leadflow", version="0.1.0", lifespan=lifespan,
+        description="Propwire → BeenVerified → Lofty → SMS + Claude → CMA",
+    )
     app.state.services = svc
     app.state.session_factory = session_factory
 
@@ -153,8 +169,8 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         signature = request.headers.get("x-twilio-signature")
         if signature:
             url = str(request.url)
-            if settings.public_base_url:
-                url = settings.public_base_url.rstrip("/") + request.url.path
+            if settings.base_url:
+                url = settings.base_url + request.url.path
                 if request.url.query:
                     url += "?" + request.url.query
             if not is_form or not svc.sms.validate_signature(url, params, signature):
@@ -165,7 +181,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
 
     @app.get("/health")
     def health(db: Session = Depends(get_db)) -> dict[str, Any]:
-        return {"ok": True, **reports.health(db, svc)}
+        return {"ok": True, **reports.health(db, svc), "scheduler": "on" if scheduler else "off"}
 
     # ---------------------------------------------------------- 1 · Prospecting
 
@@ -177,8 +193,18 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
 
     @app.post("/prospecting/import-csv", dependencies=[Depends(require_key)])
     async def import_csv(request: Request, source: str = "propwire", db: Session = Depends(get_db)) -> dict[str, Any]:
-        text = (await request.body()).decode("utf-8-sig", errors="replace")
-        report = ingest_rows(db, svc, parse_csv(text), source)
+        """Body = the CSV itself, or a multipart upload (Zapier: Webhooks POST with the File field)."""
+        if request.headers.get("content-type", "").startswith("multipart/form-data"):
+            form = await request.form()
+            upload = next((v for v in form.values() if isinstance(v, UploadFile)), None)
+            if upload is None:
+                raise HTTPException(422, "no file in the upload")
+            raw = await upload.read()
+        else:
+            raw = await request.body()
+        if raw[:2] == b"PK":
+            raise HTTPException(422, "this looks like an Excel file; export the list from Propwire as CSV")
+        report = ingest_rows(db, svc, parse_csv(raw.decode("utf-8-sig", errors="replace")), source)
         db.commit()
         return report.as_dict()
 

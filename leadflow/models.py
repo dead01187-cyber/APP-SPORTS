@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -181,3 +181,15 @@ class ReviewItem(Base):
     resolution: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class SchedulerRun(Base):
+    """One row per scheduled task run; the unique key stops two servers running the same slot."""
+
+    __tablename__ = "scheduler_runs"
+    __table_args__ = (UniqueConstraint("task", "slot", name="uq_scheduler_task_slot"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task: Mapped[str] = mapped_column(String(40))
+    slot: Mapped[str] = mapped_column(String(40))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

@@ -45,10 +45,12 @@ class ProspectingRules(BaseModel):
 class LoftyRules(BaseModel):
     source: str = "Propwire"
     tags: list[str] = ["Propwire"]
-    pond: str | None = None
-    level: str | None = None
+    pond_name: str | None = None  # for reference only; Lofty needs pond_id
+    pond_id: int | None = None
+    lead_types: list[int] = []
+    ownership_scope: str | None = None  # PERSONAL | TEAM | COMPANY
     call_and_text: bool = True
-    assigned_agent: str | None = None
+    assigned_user_id: int | None = None
 
 
 class QuietHours(BaseModel):
@@ -113,6 +115,19 @@ class CmaRules(BaseModel):
     follow_up_days: int = 3
 
 
+class SchedulerRules(BaseModel):
+    """Built-in scheduler (SCHEDULER_ENABLED=true). Times are local, in contact.quiet_hours.timezone."""
+
+    jobs_every_minutes: int = 15
+    campaign_enabled: bool = True
+    campaign_time: time = time(10, 0)
+    campaign_days: list[str] = ["mon", "tue", "wed", "thu", "fri"]
+    campaign_mode: Literal["sms", "call"] = "sms"
+    reconcile_time: time = time(3, 0)
+    weekly_report_day: str | None = "mon"
+    weekly_report_time: time = time(8, 0)
+
+
 class TagRules(BaseModel):
     spanish: str = "ES"
     cma_sent: str = "CMA Sent"
@@ -157,6 +172,7 @@ class Rules(BaseModel):
     actions: dict[str, ActionRule] = Field(default_factory=lambda: dict(DEFAULT_ACTIONS))
     follow_up: FollowUpRules = FollowUpRules()
     cma: CmaRules = CmaRules()
+    scheduler: SchedulerRules = SchedulerRules()
     tags: TagRules = TagRules()
     templates: dict[str, dict[str, str]] = Field(default_factory=lambda: dict(DEFAULT_TEMPLATES))
 

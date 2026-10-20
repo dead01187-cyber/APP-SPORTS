@@ -100,6 +100,8 @@ def test_stop_reply_marks_dnc_without_calling_claude(db, services, make_lead):
     assert db.scalars(select(DncEntry.phone)).all() == ["+12134821234"]
     assert services.classifier.calls == []
     assert jobs(db) == []
+    payload = services.lofty.payloads[lead.lofty_lead_id]
+    assert payload["cannotText"] is True and payload["cannotCall"] is True  # Lofty knows too
 
 
 def test_interested_seller_becomes_hot_and_queues_cma(db, services, make_lead):
@@ -110,7 +112,7 @@ def test_interested_seller_becomes_hot_and_queues_cma(db, services, make_lead):
     assert decision["status"] == "hot" and decision["next_action"] == "cma" and decision["cma_queued"]
     assert lead.intent == "selling" and {"Hot", "Seller Interested"} <= set(lead.tags)
     assert [j.type for j in jobs(db)] == ["cma"]
-    assert services.alerts.sent and "Hot seller" in services.alerts.sent[0]
+    assert services.alerts.sent and "Vendedor interesado" in services.alerts.sent[0]
     call = services.classifier.calls[0]
     assert call["history"][0]["direction"] == "agent"  # Claude sees the message we sent
     assert call["lead"]["property_address"] == "123 Main Street"

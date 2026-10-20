@@ -1,88 +1,64 @@
-# Configurar Zapier
+# Configurar Zapier (2 Zaps)
 
-Zapier es el “motor de automatización”: dispara cada paso llamando a este servicio.
-Todos los Zaps usan **Webhooks by Zapier → Custom Request** (o POST) con:
+El servidor ya hace solo los seguimientos, campañas, reintentos, la conciliación con Lofty y el
+reporte semanal (programador interno, `SCHEDULER_ENABLED=true`). Las respuestas SMS llegan
+directo de Twilio. En Zapier solo hacen falta dos Zaps.
 
-- URL: `https://SU-SERVIDOR/<ruta>`
-- Encabezados: `X-API-Key: <su API_KEY>` y `Content-Type: application/json`
-
-La respuesta siempre es JSON, así que los pasos siguientes del Zap (Paths, Filter, Slack, Email)
-pueden usar sus campos.
+Antes de empezar necesita:
+- La URL del servidor (p. ej. `https://leadflow.onrender.com`). Ver `docs/render.md`.
+- La `API_KEY` del servidor (Render → *Environment*).
 
 ---
 
 ## Zap 1 · Importar leads de Propwire
 
-**Disparador:** Google Drive → *New File in Folder* (la carpeta donde guarda los CSV exportados de Propwire).
+1. **Disparador:** Google Drive → *New File in Folder*. Elija la carpeta donde guarda los CSV
+   exportados de Propwire.
+2. **Acción:** Webhooks by Zapier → *POST*
+   - URL: `https://SU-SERVIDOR/prospecting/import-csv`
+   - Payload Type: `form`
+   - File: el campo *File* del paso 1
+   - Headers: `X-API-Key` = su `API_KEY`
+3. Pruébelo con un CSV pequeño. La respuesta muestra `created`, `duplicates`, `rejected` e
+   `imported_to_lofty`.
 
-**Acción:** Webhooks by Zapier → *Custom Request*
-- Método: `POST`
-- URL: `https://SU-SERVIDOR/prospecting/import-csv`
-- Encabezados: `X-API-Key: ...`, `Content-Type: text/csv`
-- Data: el contenido del archivo (campo *File* del disparador)
+Exporte siempre en **CSV** (no Excel). Si sube un Excel, el servidor responde con un error que lo indica.
 
-*Alternativa:* Google Sheets → *New Spreadsheet Row* → POST a `/prospecting/import` con
-`{"leads": [{"owner_name": "...", "property_address": "...", "zip_code": "...", "phone1": "..."}]}`.
+*Si usa el asistente de IA del editor de Zapier,* puede pegar esto:
+> Cuando se agregue un archivo nuevo a la carpeta "Propwire" de Google Drive, enviarlo con un POST
+> de Webhooks by Zapier a https://SU-SERVIDOR/prospecting/import-csv, como archivo (payload type form),
+> con el encabezado X-API-Key: SU_API_KEY.
 
-La respuesta trae `created`, `duplicates`, `rejected` y `imported_to_lofty`.
+## Zap 2 · Alertas (vendedores interesados, errores, reporte semanal)
 
-## Zap 2 · Campaña de mensajes iniciales
+1. **Disparador:** Webhooks by Zapier → *Catch Hook*. Copie la URL que le da Zapier.
+2. Pegue esa URL en Render → *Environment* → `ALERT_WEBHOOK_URL`.
+3. **Acción:** Gmail → *Send Email* (o Twilio → *Send SMS* a su celular) con el campo `text`
+   como cuerpo del mensaje.
 
-**Disparador:** Schedule by Zapier → *Every Weekday* a las 10:00.
+Llegan alertas cuando:
+- alguien responde que quiere vender o comprar;
+- una API falla y necesita atención;
+- el lunes a las 8:00, con el reporte semanal (importados, contactados, tasa de respuesta,
+  CMAs enviados, oportunidades Hot, errores).
 
-**Acción:** POST `https://SU-SERVIDOR/contact/campaign` con `{"mode": "sms", "limit": 100}`.
+---
 
-Para trabajar por llamadas uno por uno, use `{"mode": "call"}`: los leads quedan en la lista de
-llamadas (`GET /review?kind=call`). Después de llamar, envíe las notas a `/contact/call-outcome`
-y Claude las clasifica igual que un SMS.
-
-## Zap 3 · Respuestas SMS
-
-**Opción A (recomendada, sin Zapier):** en la consola de Twilio, en su número →
-*Messaging → A message comes in* → Webhook `https://SU-SERVIDOR/webhooks/sms/inbound` (HTTP POST).
-Configure también `PUBLIC_BASE_URL` para que la firma de Twilio se valide.
-
-**Opción B (con Zapier):**
-- Disparador: Twilio → *New Received SMS*.
-- Acción: POST `https://SU-SERVIDOR/webhooks/sms/inbound` con
-  `{"from": "{{From}}", "body": "{{Body}}", "message_id": "{{MessageSid}}"}`.
-- Opcional: *Paths by Zapier* según `status` de la respuesta:
-  - `hot` → mensaje de Slack o SMS al agente.
-  - `dnc` → nada más (ya quedó en la lista DNC).
-
-## Zap 4 · Trabajos programados (seguimientos, CMA, reintentos)
-
-**Disparador:** Schedule by Zapier → *Every Hour*.
-
-**Acción:** POST `https://SU-SERVIDOR/jobs/run-due` con `{}`.
-
-Esto envía los seguimientos de 6 meses / 1 año / fecha específica, crea y envía los CMAs,
-y reintenta las llamadas a APIs que fallaron (1 min, 5 min, 30 min, 2 h, 12 h). Si un trabajo
-falla 5 veces, va a la cola de revisión y se envía una alerta.
-
-## Zap 5 · Conciliación y reporte
-
-- **Diario:** Schedule → POST `https://SU-SERVIDOR/monitoring/reconcile`.
-  Reintenta leads que no llegaron a Lofty y reactiva trabajos atascados.
-- **Semanal:** Schedule → GET `https://SU-SERVIDOR/reports/summary?days=7` →
-  Email by Zapier / Slack con `leads_imported`, `contacted`, `response_rate`, `cma_sent`,
-  `opportunities_hot` y `errors_last_24h`.
-
-## Zap 6 · Alertas
-
-- Disparador: Webhooks by Zapier → *Catch Hook*. Copie la URL que le da Zapier.
-- Póngala en `ALERT_WEBHOOK_URL` del servicio.
-- Acción: Email by Zapier (o Slack) con el campo `text`.
-
-Llegan alertas cuando hay un vendedor interesado, un comprador, o un error que necesita atención.
-
-## Cola de revisión manual
+## Opcional: llamadas y revisión manual
 
 `GET /review` lista lo que necesita a una persona: respuestas poco claras, preguntas (con la
 respuesta sugerida por Claude), la lista de llamadas, CMAs para hacer a mano y errores.
-Para cerrar un pendiente y, si quiere, enviar la respuesta:
 
-```
-POST /review/{id}/resolve
-{"resolution": "respondido", "send_reply": "Hola, soy Daniel..."}
-```
+- Cerrar un pendiente y enviar la respuesta:
+  `POST /review/{id}/resolve` con `{"resolution": "respondido", "send_reply": "Hola, soy Daniel..."}`
+- Registrar una llamada (Claude clasifica las notas como si fueran un SMS):
+  `POST /contact/call-outcome` con `{"lead_id": 12, "notes": "Quiere vender en primavera"}`
+
+Puede abrir `https://SU-SERVIDOR/docs` para usar estos endpoints desde el navegador.
+
+## Si prefiere que Zapier dispare todo
+
+Ponga `SCHEDULER_ENABLED=false` y cree Zaps con *Schedule by Zapier* que llamen (POST, con `X-API-Key`):
+- `/jobs/run-due` cada hora,
+- `/contact/campaign` con `{"mode": "sms"}` de lunes a viernes a las 10:00,
+- `/monitoring/reconcile` una vez al día.
