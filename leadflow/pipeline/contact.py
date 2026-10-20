@@ -220,9 +220,13 @@ def run_campaign(
     return report
 
 
+def initial_template(lead: Lead) -> str:
+    return "initial" if lead.contact_is_owner is not False else "initial_owner_check"
+
+
 def send_initial(db: Session, services: Services, lead: Lead) -> Message | None:
     """First text to a lead, on the first number that can receive it. Raises IntegrationError."""
-    message = send_to_first_usable(db, services, lead, lambda _p: render(services, lead, "initial"), "initial")
+    message = send_to_first_usable(db, services, lead, lambda _p: render(services, lead, initial_template(lead)), "initial")
     if message is None:
         lead.status = LeadStatus.NO_PHONE
         return None
@@ -240,7 +244,7 @@ def send_initial_to_phone(db: Session, services: Services, lead: Lead, phone_id:
         lead.status = LeadStatus.NO_PHONE
         return None
     try:
-        message = send_sms(db, services, lead, phone, render(services, lead, "initial"), "initial")
+        message = send_sms(db, services, lead, phone, render(services, lead, initial_template(lead)), "initial")
     except ContactBlocked:
         return send_initial_to_phone(db, services, lead, None)
     lofty_note(db, services, lead, f"Initial SMS sent to next number {phone.number}.")
@@ -301,6 +305,7 @@ def lead_context(lead: Lead) -> dict[str, Any]:
         "city": lead.city,
         "current_status": lead.status,
         "preferred_language": lead.language,
+        "first_text_asked_if_they_are_the_owner": "yes" if lead.contact_is_owner is False else "",
     }
 
 

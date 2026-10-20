@@ -78,6 +78,9 @@ Categories:
 - unclear: emojis, one-word replies with no clear meaning, or anything that fits none of the above.
 - opt_out: asks to stop, unsubscribe, not be contacted, or is hostile about being contacted, in any language.
 
+When the first text asked whether they own the property: "no, I rent / I'm not the owner" is wrong_number, and a
+bare "yes, that's me" with no view on selling is question (suggest a reply asking whether they would consider selling).
+
 Fields:
 - confidence: 0 to 1, how sure you are of the category.
 - language: language of the reply ("en" or "es").

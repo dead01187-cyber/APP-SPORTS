@@ -41,7 +41,9 @@ def test_trust_owner_is_greeted_by_the_skip_traced_contact():
 def test_import_skips_dnc_numbers_and_litigators(db, services):
     report = ingest_rows(db, services, rows())
     db.commit()
-    assert report.created == 3
+    assert report.created == 4 and report.merged == 1
+    assert report.as_dict()["rejected_by_reason"] == {
+        "all phones on Do Not Call": 1, "TCPA litigator": 1, "no valid phone": 1}
     assert sorted(r["reason"] for r in report.rejected) == [
         "TCPA litigator", "all phones on Do Not Call", "no valid phone"]
 
@@ -98,3 +100,81 @@ def test_initial_text_in_spanish_uses_contact_name(db, services):
     trust = lead_at(db, "202 Sample Ave")
     trust.language = "es"
     assert render(services, trust, "initial").startswith("Hola Robert, soy Daniel")
+
+
+def test_condo_units_with_the_same_contact_become_one_lead(db, services):
+    report = ingest_rows(db, services, rows())
+    db.commit()
+    units = db.scalars(select(Lead).where(Lead.property_address == "101 Example St")).all()
+    assert len(units) == 1 and report.merged == 1
+    maria = units[0]
+    assert maria.raw["linked_properties"] == [{"address": "101 Example St", "city": "Los Angeles", "apn": "100-001-02"}]
+    assert any("Same contact is also linked to: 101 Example St, Los Angeles (Condominium / Townhouse · APN 100-001-02)"
+               in text for _, text in services.lofty.notes)
+
+    run_campaign(db, services, now=DAYTIME)
+    assert [to for to, _ in services.sms.sent].count("+12135550101") == 1  # one text, not one per unit
+
+
+def test_contact_who_is_not_an_owner_is_asked_if_they_own_it(db, services):
+    ingest_rows(db, services, rows())
+    db.commit()
+    rental = lead_at(db, "808 Rental Way")
+    assert rental.contact_is_owner is False and "Contact Not Owner" in rental.tags
+    assert lead_at(db, "202 Sample Ave").contact_is_owner is True  # Robert Smith, John A Smith Living Trust
+
+    run_campaign(db, services, now=DAYTIME)
+    sent = dict(services.sms.sent)
+    assert sent["+12135550111"] == ("Hi Carlos, this is Daniel, a local real estate agent. I'm trying to reach the "
+                                    "owner of 808 Rental Way. Is that you? Reply STOP to opt out.")
+    assert sent["+12135550105"].startswith("Hi Robert, this is Daniel, a local real estate agent. Would you consider")
+
+
+def test_a_later_list_flagging_an_existing_lead_stops_all_contact(db, services):
+    clean = rows()[3]
+    for col in ("Litigator",):
+        clean[col] = ""
+    ingest_rows(db, services, [clean])  # first list: Lee Park not flagged yet
+    db.commit()
+    lee = lead_at(db, "404 Demo Dr")
+    assert lee.status == "imported"
+
+    report = ingest_rows(db, services, [rows()[3]])  # later list marks him "tcpa"
+    db.commit()
+    assert report.duplicates == 1 and report.existing_leads_protected == 1
+    assert lee.status == "dnc" and {p.status for p in lee.phones} == {"dnc"}
+    payload = services.lofty.payloads[lee.lofty_lead_id]
+    assert payload["phones"] == [] and payload["cannotText"] is True and payload["cannotCall"] is True
+
+    run_campaign(db, services, now=DAYTIME)
+    run_campaign(db, services, mode="call", now=DAYTIME)
+    assert services.sms.sent == []
+    from leadflow.models import ReviewItem
+    assert db.scalars(select(ReviewItem).where(ReviewItem.kind == "call")).first() is None
+
+
+def test_a_dnc_flag_in_a_later_list_blocks_that_number_on_existing_leads(db, services):
+    clean = rows()[0]
+    for col in ("Do Not 2 Call", "Do Not 3 Call"):
+        clean[col] = ""
+    ingest_rows(db, services, [clean])
+    db.commit()
+    maria = lead_at(db, "101 Example St")
+    assert len(maria.phones) == 3
+
+    ingest_rows(db, services, [rows()[0]])  # now phones 2 and 3 are on the Do Not Call list
+    db.commit()
+    assert [p.status for p in maria.phones] == ["valid", "dnc", "dnc"]
+    assert maria.status == "imported"  # only those numbers are blocked, not the person
+    assert services.lofty.payloads[maria.lofty_lead_id]["phones"] == ["2135550101"]
+
+
+def test_a_litigator_later_in_the_file_protects_an_earlier_row_with_the_same_number(db, services):
+    first = rows()[4]  # bank-owned property, Phone 1 = 2135550110
+    litigator = rows()[3]
+    litigator["Phone 1"] = "2135550110"
+    report = ingest_rows(db, services, [first, litigator])
+    db.commit()
+    assert report.created == 0
+    assert sorted(r["reason"] for r in report.rejected) == ["TCPA litigator", "all phones on Do Not Call"]
+    assert all("2135550110" not in p["phones"] for p in services.lofty.payloads.values())

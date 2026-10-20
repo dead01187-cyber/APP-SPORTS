@@ -137,6 +137,7 @@ class SchedulerRules(BaseModel):
 class TagRules(BaseModel):
     spanish: str = "ES"
     cma_sent: str = "CMA Sent"
+    contact_not_owner: str = "Contact Not Owner"
     status: dict[str, str] = {
         "hot": "Hot",
         "warm": "Warm",
@@ -152,6 +153,12 @@ DEFAULT_TEMPLATES: dict[str, dict[str, str]] = {
         "selling {street}, or would a free market analysis help? Reply STOP to opt out.",
         "es": "Hola {first_name}, soy {agent_name}, agente de bienes raíces local. ¿Consideraría vender "
         "{street} o le serviría un análisis de mercado gratis? Responda STOP para no recibir mensajes.",
+    },
+    "initial_owner_check": {
+        "en": "Hi {first_name}, this is {agent_name}, a local real estate agent. I'm trying to reach the owner "
+        "of {street}. Is that you? Reply STOP to opt out.",
+        "es": "Hola {first_name}, soy {agent_name}, agente de bienes raíces local. Busco al dueño de {street}. "
+        "¿Es usted? Responda STOP para no recibir mensajes.",
     },
     "follow_up": {
         "en": "Hi {first_name}, {agent_name} here following up about {street}. Is selling still on "

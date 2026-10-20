@@ -52,7 +52,8 @@ class LoftyClient(HttpService):
 
     @staticmethod
     def lead_payload(lead: Lead, rules: LoftyRules) -> dict[str, Any]:
-        phones = [_lofty_phone(p.number) for p in lead.phones if p.status not in ("invalid", "wrong_number")]
+        # Do Not Call numbers stay out of Lofty too, so nobody dials or texts them from the CRM.
+        phones = [_lofty_phone(p.number) for p in lead.phones if p.status not in ("invalid", "wrong_number", "dnc")]
         emails = [e for e in [lead.email, *(lead.extra_emails or [])] if e]
         blocked = lead.status == "dnc" or not rules.call_and_text
         payload: dict[str, Any] = {

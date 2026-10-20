@@ -16,6 +16,12 @@ FIELD_ALIASES: dict[str, list[str]] = {
     "owner_name": ["ownername", "owner1name", "owner1fullname", "ownerfullname", "owner", "fullname", "name"],
     "owner_first": ["owner1firstname", "ownerfirstname"],
     "owner_last": ["owner1lastname", "ownerlastname"],
+    "owner2_first": ["owner2firstname"],
+    "owner2_last": ["owner2lastname"],
+    "owner3_first": ["owner3firstname"],
+    "owner3_last": ["owner3lastname"],
+    "owner4_first": ["owner4firstname"],
+    "owner4_last": ["owner4lastname"],
     # The person a skip trace matched to the phones/emails (Propwire "Name 1").
     "contact_name": ["name1", "contactname", "skiptracename"],
     "first_name": ["firstname", "contactfirstname"],
@@ -68,8 +74,14 @@ COMPANY_RE = re.compile(
 # Family/living trusts and estates: owned by people, but the name is not a person's name.
 TRUST_RE = re.compile(r"\b(TRUST|TR|TRS|TRUSTEES?|REVOCABLE|IRREVOCABLE|ESTATE OF|LIVING)\b", re.IGNORECASE)
 
-TRUE_FLAGS = {"dnc", "yes", "y", "true", "1", "x"}
-FALSE_FLAGS = {"", "no", "n", "false", "0"}
+# A flag column counts as set unless it is empty or an explicit no. For Do Not Call and
+# litigator columns, an unknown marker ("Federal DNC", "tcpa") must err on the safe side.
+FALSE_FLAGS = {"", "no", "n", "false", "0", "0.0", "none", "null"}
+# Words that say nothing about who a person is, ignored when matching contact and owner names.
+NAME_NOISE = {
+    "THE", "AND", "OF", "TRUST", "TR", "TRS", "TRUSTEE", "TRUSTEES", "FAMILY", "LIVING", "REVOCABLE",
+    "IRREVOCABLE", "REV", "ESTATE", "SURVIVORS", "DECEDENTS", "SEPARATE", "PROPERTY", "DATED", "ETAL", "JR", "SR",
+}
 
 # Checked in order: the more specific types come before the generic "residential".
 PROPERTY_TYPES = [
@@ -185,8 +197,11 @@ def name_key(name: str | None) -> str:
     return re.sub(r"[^a-z0-9]", "", (name or "").lower())
 
 
-def make_dedupe_key(address: str | None, zip_code: str | None, owner: str | None) -> str:
-    return f"{address_key(address)}|{zip_code or ''}|{name_key(owner)}"
+def make_dedupe_key(address: str | None, zip_code: str | None, owner: str | None, parcel: str | None = None) -> str:
+    """One lead per property and owner. The parcel number (APN) tells condo units apart:
+    Propwire leaves the unit out of "Address"."""
+    key = f"{address_key(address)}|{zip_code or ''}|{name_key(owner)}"
+    return f"{key}|{name_key(parcel)}" if parcel else key
 
 
 def clean_number(value: Any, thousands: bool = False) -> str | None:
@@ -206,12 +221,18 @@ def clean_number(value: Any, thousands: bool = False) -> str | None:
 
 
 def is_flag(value: Any) -> bool:
-    return str(value or "").strip().lower() in TRUE_FLAGS
+    """Any marker other than an explicit no (Propwire writes "dnc", "tcpa", "1")."""
+    return str(value if value is not None else "").strip().lower() not in FALSE_FLAGS
 
 
-def is_litigator(value: Any) -> bool:
-    """Any marker other than an explicit no (Propwire writes "tcpa")."""
-    return str(value or "").strip().lower() not in FALSE_FLAGS
+def name_words(*names: str | None) -> set[str]:
+    words: set[str] = set()
+    for name in names:
+        for word in re.split(r"[^A-Za-z']+", name or ""):
+            word = word.replace("'", "").upper()
+            if len(word) >= 2 and word not in NAME_NOISE:
+                words.add(word)
+    return words
 
 
 def normalize_line_type(raw: Any) -> str | None:
@@ -225,12 +246,6 @@ def normalize_line_type(raw: Any) -> str | None:
     return None
 
 
-def is_company_type(owner_type: str) -> bool:
-    """Owner Type like "BANK,COMPANY" (no individual or trust behind it)."""
-    types = {t.strip() for t in owner_type.upper().split(",") if t.strip()}
-    return bool(types & {"COMPANY", "BANK"}) and not types & {"INDIVIDUAL", "TRUST"}
-
-
 def map_row(row: dict[str, Any]) -> dict[str, Any]:
     """Map arbitrary column names onto canonical field names, by alias priority."""
     by_key: dict[str, Any] = {}
@@ -240,7 +255,7 @@ def map_row(row: dict[str, Any]) -> dict[str, Any]:
         by_key.setdefault(header_key(str(key)), value)
     mapped: dict[str, Any] = {}
     for field, aliases in FIELD_ALIASES.items():
-        for alias in aliases:
+        for alias in (header_key(field), *aliases):  # canonical JSON keys (owner_first, ...) always map
             if alias in by_key:
                 mapped[field] = by_key[alias]
                 break
@@ -263,16 +278,20 @@ def canonicalize(row: dict[str, Any]) -> dict[str, Any]:
     first = smart_title(clean_text(m.get("first_name")))
     last = smart_title(clean_text(m.get("last_name")))
     owner = smart_title(clean_text(m.get("owner_name"))) or _join(owner_first, owner_last) or _join(first, last)
+    # Propwire's "Owner Type" tags (BANK, INVESTOR, ...) also appear on individuals, so only
+    # the name decides whether the owner is a business; the tags go into the CRM note.
     owner_type = (clean_text(m.get("owner_type")) or "").upper()
-    company = is_company_name(owner) or is_company_type(owner_type)
+    company = is_company_name(owner)
     entity = company or bool(owner and TRUST_RE.search(owner))
+    owner_from_parts = not (m.get("owner_name") or owner_first or owner_last)
 
     # Who we greet: the skip-traced contact, else explicit first/last, else the owner if a person.
     contact = smart_title(clean_text(m.get("contact_name")))
     if contact:
         first, last = split_name(contact)
     elif first or last:
-        pass
+        if entity and owner_from_parts:  # e.g. last_name "Smith Family Trust": not a person to greet
+            first = last = None
     elif owner_first and not entity:
         first, last = owner_first, owner_last
     elif owner and not entity:
@@ -307,16 +326,23 @@ def canonicalize(row: dict[str, Any]) -> dict[str, Any]:
     zip_code = normalize_zip(m.get("zip_code"))
     state = clean_text(m.get("state"))
     mailing = smart_title(clean_text(m.get("mailing_address")))
-    mailing_city = smart_title(clean_text(m.get("mailing_city")))
-    if mailing and mailing_city:
-        mailing_state = (clean_text(m.get("mailing_state")) or "").upper()
-        mailing = f"{mailing}, {mailing_city}, {_join(mailing_state, normalize_zip(m.get('mailing_zip')))}".rstrip(", ")
+    if mailing:
+        mailing_state = (clean_text(m.get("mailing_state")) or "").upper() or None
+        parts = [mailing, smart_title(clean_text(m.get("mailing_city"))), _join(mailing_state, normalize_zip(m.get("mailing_zip")))]
+        mailing = ", ".join(p for p in parts if p)
+
+    # Skip traces often return an occupant rather than the owner; then the first text asks
+    # whether they own the property instead of asking them to sell it.
+    owner_words = name_words(owner, owner_first, owner_last, *(
+        clean_text(m.get(f"owner{i}_{part}")) for i in (2, 3, 4) for part in ("first", "last")))
+    contact_is_owner = not contact or not owner_words or bool(name_words(contact) & owner_words)
 
     return {
         "external_id": clean_text(m.get("external_id")),
         "owner_name": owner,
         "owner_type": owner_type or None,
         "contact_name": contact,
+        "contact_is_owner": contact_is_owner,
         "first_name": first,
         "last_name": last,
         "is_company": company,
@@ -325,7 +351,7 @@ def canonicalize(row: dict[str, Any]) -> dict[str, Any]:
         "phone_meta": phone_meta,
         "dnc_phones": [n for n in phones if phone_meta[n]["dnc"]],
         "invalid_phones": invalid_phones,
-        "litigator": is_litigator(m.get("litigator")),
+        "litigator": is_flag(m.get("litigator")),
         "property_address": address,
         "city": smart_title(clean_text(m.get("city"))),
         "state": state.upper() if state and len(state) <= 3 else state,
@@ -343,7 +369,7 @@ def canonicalize(row: dict[str, Any]) -> dict[str, Any]:
             "vacant": is_flag(m.get("vacant")),
             "property_url": clean_text(m.get("property_url")),
         },
-        "dedupe_key": make_dedupe_key(address, zip_code, owner),
+        "dedupe_key": make_dedupe_key(address, zip_code, owner, clean_text(m.get("external_id"))),
     }
 
 

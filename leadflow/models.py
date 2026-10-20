@@ -47,6 +47,8 @@ class Lead(Base):
     first_name: Mapped[str | None] = mapped_column(String(100))
     last_name: Mapped[str | None] = mapped_column(String(100))
     is_company: Mapped[bool] = mapped_column(Boolean, default=False)
+    # False when the skip-traced contact's name matches no owner (often a tenant).
+    contact_is_owner: Mapped[bool] = mapped_column(Boolean, default=True)
     email: Mapped[str | None] = mapped_column(String(255))
     extra_emails: Mapped[list] = mapped_column(JSON, default=list)
     relatives: Mapped[list] = mapped_column(JSON, default=list)

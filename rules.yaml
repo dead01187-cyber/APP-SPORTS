@@ -92,6 +92,7 @@ scheduler:
 tags:
   spanish: ES
   cma_sent: CMA Sent
+  contact_not_owner: Contact Not Owner
   status: {hot: Hot, warm: Warm, follow_up: Follow-up, not_interested: Not Interested, dnc: DNC}
 
 # Plantillas de mensajes (EN / ES).
@@ -100,6 +101,10 @@ templates:
   initial:
     en: "Hi {first_name}, this is {agent_name}, a local real estate agent. Would you consider selling {street}, or would a free market analysis help? Reply STOP to opt out."
     es: "Hola {first_name}, soy {agent_name}, agente de bienes raíces local. ¿Consideraría vender {street} o le serviría un análisis de mercado gratis? Responda STOP para no recibir mensajes."
+  # Cuando el contacto de Propwire no coincide con ningún dueño (a menudo un inquilino).
+  initial_owner_check:
+    en: "Hi {first_name}, this is {agent_name}, a local real estate agent. I'm trying to reach the owner of {street}. Is that you? Reply STOP to opt out."
+    es: "Hola {first_name}, soy {agent_name}, agente de bienes raíces local. Busco al dueño de {street}. ¿Es usted? Responda STOP para no recibir mensajes."
   follow_up:
     en: "Hi {first_name}, {agent_name} here following up about {street}. Is selling still on your radar? Reply STOP to opt out."
     es: "Hola {first_name}, le saluda {agent_name} sobre {street}. ¿Sigue pensando en vender? Responda STOP para no recibir mensajes."
