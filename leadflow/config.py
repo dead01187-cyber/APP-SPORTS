@@ -43,8 +43,8 @@ class Settings(BaseSettings):
     # Alerts: a Slack incoming webhook or a Zapier catch hook (which can email).
     alert_webhook_url: str = ""
 
-    agent_name: str = "Daniel"
-    agent_phone: str = ""
+    agent_name: str = "Mark Rubio-Novack"
+    agent_phone: str = "(949) 534-3952"
 
     @property
     def base_url(self) -> str:

@@ -157,9 +157,9 @@ DEFAULT_TEMPLATES: dict[str, dict[str, str]] = {
     },
     "cma": {
         "en": "Hi {first_name}, here is your free market analysis for {street}: {link} "
-        "Happy to walk you through it. - {agent_name}",
+        "Happy to walk you through it. - {agent_name}, {agent_phone}",
         "es": "Hola {first_name}, aquí está su análisis de mercado gratis para {street}: {link} "
-        "Con gusto se lo explico. - {agent_name}",
+        "Con gusto se lo explico. - {agent_name}, {agent_phone}",
     },
 }
 
@@ -194,7 +194,8 @@ class Rules(BaseModel):
             values["first_name"] = FALLBACK_FIRST_NAME.get(lang, "")
         text = template.format_map(_Blank(values))
         text = re.sub(r"\s+([,.!?])", r"\1", text)
-        return re.sub(r"\s{2,}", " ", text).strip()
+        text = re.sub(r"\s{2,}", " ", text).strip()
+        return text.rstrip(", ")  # an empty trailing variable leaves "- Name,"
 
 
 class _Blank(dict):

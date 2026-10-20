@@ -20,7 +20,8 @@ def test_import_creates_leads_and_syncs_to_lofty(db, services):
     assert payload["cannotText"] is False and payload["cannotCall"] is False
     assert payload["streetAddress"] == "123 Main Street" and payload["zipCode"] == "90012"
     assert payload["leadTypes"] == [1]  # Seller
-    assert "pondId" not in payload  # not configured yet
+    assert payload["assignedUserId"] == 844771049678252  # Mark Rubio-Novack, from rules.yaml
+    assert "pondId" not in payload
 
     services.rules.lofty.pond_id = 4242
     from leadflow.integrations.lofty import LoftyClient

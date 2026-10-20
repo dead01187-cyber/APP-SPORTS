@@ -18,9 +18,9 @@ services:
       - key: SCHEDULER_ENABLED
         value: "true"
       - key: AGENT_NAME
-        sync: false
+        value: "Mark Rubio-Novack"
       - key: AGENT_PHONE
-        sync: false
+        value: "(949) 534-3952"
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: LOFTY_API_KEY

@@ -131,8 +131,8 @@ Estos puntos están marcados como *Pending setup* en el diagrama o dependen de s
    teléfonos, dirección, etiquetas, tipo Seller (`1`), notas y "no textear / no llamar" funcionan.
    - El campo *source* solo acepta fuentes de la lista de Lofty (si no, queda "Other"); la etiqueta
      "Propwire" sí se guarda.
-   - Sin `pond_id`, Lofty asigna cada lead al dueño de la clave API como *Personal*. Ponga en `rules.yaml`
-     → `lofty` → `pond_id` el número del pond "Daniel R-N".
+   - Los leads se asignan a **Mark Rubio-Novack** (`rules.yaml` → `lofty` → `assigned_user_id`).
+     Para mandarlos a un pond en su lugar, ponga su número en `pond_id`.
    - "Level: Company" no está disponible para la cuenta conectada (solo *Personal*).
 2. **CMA.** Lofty no tiene API de CMA en su cuenta. Cuando alguien quiere vender, llega una alerta con un
    link seguro: abre una página, pega el link del CMA hecho en Lofty y el sistema lo envía por SMS,

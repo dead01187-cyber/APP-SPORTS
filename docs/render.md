@@ -11,8 +11,6 @@ Tiempo estimado: 20–30 minutos. Necesita el código en GitHub (repositorio `AP
 
 | Variable | Dónde se consigue |
 |---|---|
-| `AGENT_NAME` | El nombre que firma los SMS (p. ej. Daniel) |
-| `AGENT_PHONE` | Opcional |
 | `ANTHROPIC_API_KEY` | https://console.anthropic.com → API Keys |
 | `LOFTY_API_KEY` | En Lofty, en la sección de integraciones / API. Si no la encuentra, pídala al soporte de Lofty |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` | https://console.twilio.com → *Account Info* |
@@ -42,9 +40,11 @@ Twilio → *Messaging → Regulatory Compliance*.
 
 En `rules.yaml` → `lofty`:
 
-- `pond_id`: el número del pond "Daniel R-N" (Lofty lo pide como número, no como nombre).
-  Sin él, cada lead queda asignado como *Personal* al dueño de la clave API de Lofty.
+- `assigned_user_id: 844771049678252` asigna cada lead a **Mark Rubio-Novack**.
+  Para usar un pond en su lugar, ponga su número en `pond_id`.
 - `lead_types: [1]` ya marca los leads como **Seller** (verificado en su cuenta).
+
+Los SMS van firmados por **Mark Rubio-Novack, (949) 534-3952** (`AGENT_NAME` y `AGENT_PHONE` en `render.yaml`).
 
 Cada cambio en GitHub vuelve a desplegar el servidor automáticamente.
 

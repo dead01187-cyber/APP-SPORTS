@@ -16,16 +16,14 @@ prospecting:
 lofty:
   source: Propwire             # Lofty solo guarda fuentes de su propia lista; si no existe queda "Other"
   tags: [Propwire]             # la etiqueta sí se guarda siempre
-  pond_name: "Daniel R-N"
-  # Lofty asigna el pond por número. Ábralo en Lofty y copie el número (pondId).
-  pond_id: null
+  pond_name: null
+  pond_id: null                # sin pond: cada lead se asigna a la persona de abajo
   # Tipo de lead: 1 = Seller (verificado en su cuenta).
   lead_types: [1]
   # Nivel de propiedad del lead (Level). La cuenta conectada en Zapier solo ofrece Personal.
   ownership_scope: null        # PERSONAL | TEAM | COMPANY
   call_and_text: true          # Call & Text: Yes
-  # Sin pond_id ni assigned_user_id, Lofty asigna el lead al dueño de la clave API (Personal).
-  assigned_user_id: null
+  assigned_user_id: 844771049678252   # Mark Rubio-Novack (ID de usuario en Lofty)
 
 # 2 · Contacto
 contact:
@@ -104,5 +102,5 @@ templates:
     en: "Hi {first_name}, {agent_name} here following up about {street}. Is selling still on your radar? Reply STOP to opt out."
     es: "Hola {first_name}, le saluda {agent_name} sobre {street}. ¿Sigue pensando en vender? Responda STOP para no recibir mensajes."
   cma:
-    en: "Hi {first_name}, here is your free market analysis for {street}: {link} Happy to walk you through it. - {agent_name}"
-    es: "Hola {first_name}, aquí está su análisis de mercado gratis para {street}: {link} Con gusto se lo explico. - {agent_name}"
+    en: "Hi {first_name}, here is your free market analysis for {street}: {link} Happy to walk you through it. - {agent_name}, {agent_phone}"
+    es: "Hola {first_name}, aquí está su análisis de mercado gratis para {street}: {link} Con gusto se lo explico. - {agent_name}, {agent_phone}"

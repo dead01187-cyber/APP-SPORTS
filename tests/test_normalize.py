@@ -71,3 +71,18 @@ def test_template_rendering_falls_back_when_name_missing():
     assert en.startswith("Hi there, this is Daniel")
     assert es.startswith("Hola, soy Daniel")
     assert "STOP" in en and "STOP" in es
+
+
+def test_cma_message_is_signed_with_agent_name_and_phone():
+    from leadflow.config import Settings
+    from leadflow.rules import load_rules
+
+    from .conftest import ROOT
+
+    rules = load_rules(ROOT / "rules.yaml")
+    agent = Settings(_env_file=None)
+    text = rules.render("cma", "es", first_name="Maria", street="9 Oak Ave", link="https://x/c",
+                        agent_name=agent.agent_name, agent_phone=agent.agent_phone)
+    assert text.endswith("Con gusto se lo explico. - Mark Rubio-Novack, (949) 534-3952")
+    no_phone = rules.render("cma", "en", first_name="Ann", street="1 A St", link="https://x/c", agent_name="Mark")
+    assert no_phone.endswith("Happy to walk you through it. - Mark")
