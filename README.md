@@ -31,6 +31,22 @@ Propwire (CSV) ──► 1 · Prospección ──► Lofty (leads limpios, etiqu
 | Horarios (seguimientos, campaña diaria, conciliación) | `leadflow/scheduler.py`, `rules.yaml` → `scheduler` |
 | Zapier (2 Zaps: importar CSV y alertas) | `docs/zapier.md` |
 
+## Listas de Propwire
+
+El importador lee la exportación de Propwire tal cual (56 columnas). Probado con una lista real de 250 propiedades:
+
+- **Registro No Llamar:** los teléfonos marcados `dnc` en "Do Not 1/2/3 Call" no se usan y quedan en la lista DNC
+  interna, para que no se les escriba aunque aparezcan en otra lista sin la marca.
+- **Litigantes:** las filas marcadas `tcpa` en "Litigator" se descartan, y sus números quedan en la lista DNC.
+- **Listas posteriores:** si un CSV nuevo marca un número o un litigante que ya estaba en el sistema, ese número se
+  bloquea en los leads existentes (y en Lofty).
+- **Tipo de teléfono:** los fijos ("Land Line") van solo a la lista de llamadas; nunca reciben SMS.
+- **Mismo contacto en varias propiedades** (unidades de un condominio): un solo lead y un solo SMS; las otras
+  propiedades se anotan en ese lead.
+- **Contacto que no es el dueño:** cuando "Name 1" no coincide con ningún dueño (a menudo un inquilino), el primer SMS
+  pregunta "¿es usted el dueño de…?" en vez de ofrecer vender (plantilla `initial_owner_check`).
+- Cada lead nuevo lleva en Lofty una nota con el dueño registrado, la propiedad, la dirección postal, el APN y el link.
+
 ## Cómo se decide cada respuesta
 
 | Claude clasifica | Estado | Siguiente paso (configurable en `rules.yaml`) |
@@ -117,7 +133,7 @@ Todos piden el encabezado `X-API-Key`, salvo `/health` (y los webhooks firmados 
 ## Pruebas
 
 ```bash
-pytest                                   # 70 pruebas, SQLite en memoria
+pytest                                   # 89 pruebas, SQLite en memoria
 TEST_DATABASE_URL=postgresql+psycopg://usuario@localhost/leadflow_test pytest   # mismas pruebas en PostgreSQL
 ```
 
