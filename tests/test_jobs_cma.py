@@ -41,6 +41,7 @@ def test_full_flow_from_reply_to_cma_and_follow_up_call(db, services, make_lead)
     assert follow_up.run_at == DAYTIME + timedelta(days=3)
     run_due_jobs(db, services, now=DAYTIME + timedelta(days=3))
     assert "about the CMA" in reviews(db, "call")[0].summary
+    assert services.alerts.sent[-1] == "Recordatorio: llame a John Smith sobre el CMA de 123 Main Street. Tel: +12134821234"
 
 
 def test_cma_not_available_in_lofty_goes_to_manual_then_link_is_sent(db, services, make_lead):

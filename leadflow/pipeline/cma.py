@@ -193,3 +193,8 @@ def cma_follow_up(db: Session, services: Services, lead: Lead) -> None:
     open_review(db, "call", f"Call {lead.owner_name} about the CMA for {lead.property_address}", lead.id,
                 {"reason": "cma_follow_up"})
     lofty_note(db, services, lead, "Reminder: call about the CMA that was sent.")
+    phone = usable_phone(db, lead, services)
+    services.alerts.send(
+        f"Recordatorio: llame a {lead.owner_name} sobre el CMA de {lead.property_address}"
+        + (f". Tel: {phone.number}" if phone else "")
+    )
