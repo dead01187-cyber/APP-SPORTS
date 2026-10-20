@@ -39,6 +39,10 @@ class ProspectingRules(BaseModel):
     # Empty list = accept every property type.
     property_types: list[str] = []
     skip_company_owners: bool = False
+    # Leave out numbers the list marks Do Not Call, and remember them so they are never texted.
+    skip_dnc_phones: bool = True
+    # Leave out known TCPA litigators entirely (Propwire "Litigator" column).
+    skip_litigators: bool = True
     enrich: bool = True
 
 

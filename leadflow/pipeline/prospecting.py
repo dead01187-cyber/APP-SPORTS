@@ -95,10 +95,23 @@ def ingest_rows(db: Session, services: Services, rows: list[dict[str, Any]], sou
             continue
         seen.add(key)
 
+        if data["litigator"] and rules.skip_litigators:
+            # Never contact known TCPA litigators, now or if they show up again in another list.
+            for number in data["phones"]:
+                remember_dnc(db, number, "litigator", dnc)
+            report.rejected.append({"row": index, "reason": "TCPA litigator"})
+            continue
+        if rules.skip_dnc_phones:
+            for number in data["dnc_phones"]:
+                remember_dnc(db, number, "do_not_call_list", dnc)
+
         enrich(data, services, db)
+        skipped_dnc = [p for p in data["phones"] if p in dnc]
         data["phones"] = [p for p in data["phones"] if p not in dnc][: rules.max_phones]
 
         reason = check_filters(data, services)
+        if reason == "no valid phone" and skipped_dnc:
+            reason = "all phones on Do Not Call"
         if reason:
             report.rejected.append({"row": index, "reason": reason})
             continue
@@ -123,14 +136,16 @@ def ingest_rows(db: Session, services: Services, rows: list[dict[str, Any]], sou
             language=data["language"],
             status=LeadStatus.NEW,
             tags=list(services.rules.lofty.tags),
-            raw={k: v for k, v in row.items() if isinstance(k, str)},
+            raw={
+                **{k: v for k, v in row.items() if isinstance(k, str)},
+                "leadflow_note": import_note(data, source, len(skipped_dnc)),
+            },
         )
         if data["language"] == "es":
             lead.add_tags(services.rules.tags.spanish)
         enriched = set(data.get("enriched_phones", []))
         lead.phones = [
-            LeadPhone(number=n, position=i, status=PhoneStatus.UNVERIFIED,
-                      source="beenverified" if n in enriched else source)
+            new_phone(n, i, data["phone_meta"].get(n, {}).get("type"), "beenverified" if n in enriched else source)
             for i, n in enumerate(data["phones"])
         ]
         db.add(lead)
@@ -148,8 +163,57 @@ def ingest_rows(db: Session, services: Services, rows: list[dict[str, Any]], sou
     return report
 
 
+def remember_dnc(db: Session, number: str, reason: str, known: set[str]) -> None:
+    if number not in known:
+        db.add(DncEntry(phone=number, reason=reason))
+        known.add(number)
+
+
+def new_phone(number: str, position: int, line_type: str | None, source: str) -> LeadPhone:
+    """A phone whose type the list already gives (mobile/landline) needs no paid lookup."""
+    if line_type == "mobile":
+        status = PhoneStatus.VALID
+    elif line_type == "landline":
+        status = PhoneStatus.LANDLINE
+    else:
+        status = PhoneStatus.UNVERIFIED
+    return LeadPhone(number=number, position=position, status=status, line_type=line_type, source=source)
+
+
+def import_note(data: dict[str, Any], source: str, skipped_dnc: int) -> str:
+    """Property facts from the list, written once to the Lofty lead when it is created."""
+    d = data.get("details") or {}
+    owner = data.get("owner_name") or ""
+    if data.get("owner_type"):
+        owner += f" ({data['owner_type'].replace(',', ', ').lower()})"
+    facts = [
+        d.get("property_type"),
+        d.get("bedrooms") and f"{d['bedrooms']} bd",
+        d.get("bathrooms") and f"{d['bathrooms']} ba",
+        d.get("living_sqft") and f"{d['living_sqft']} sqft",
+        d.get("year_built") and f"built {d['year_built']}",
+    ]
+    lines = [
+        f"Imported from {source.title()}.",
+        f"Owner of record: {owner}" if owner else None,
+        f"Contact found by skip trace: {data['contact_name']}"
+        if data.get("contact_name") and data.get("contact_name") != data.get("owner_name") else None,
+        "Property: " + " · ".join(f for f in facts if f) if any(facts) else None,
+        f"Mailing address: {data['mailing_address']}" if data.get("mailing_address") else None,
+        " · ".join(p for p in [
+            data.get("external_id") and f"APN {data['external_id']}",
+            d.get("ownership_months") and f"owned {d['ownership_months']} months",
+            d.get("vacant") and "vacant",
+        ] if p) or None,
+        f"Phones left out (Do Not Call list): {skipped_dnc}" if skipped_dnc else None,
+        d.get("property_url"),
+    ]
+    return "\n".join(line for line in lines if line)
+
+
 def sync_to_lofty(db: Session, services: Services, lead: Lead, raise_errors: bool = False) -> bool:
     """Create/update the lead in Lofty. On failure, schedule a retry (or raise for the job runner)."""
+    created = lead.lofty_lead_id is None
     try:
         lead.lofty_lead_id = services.lofty.upsert_lead(lead, services.rules.lofty)
     except IntegrationError as exc:
@@ -160,4 +224,9 @@ def sync_to_lofty(db: Session, services: Services, lead: Lead, raise_errors: boo
     if lead.status == LeadStatus.NEW:
         lead.status = LeadStatus.IMPORTED
     log_event(db, "lofty_synced", lead.id, lofty_lead_id=lead.lofty_lead_id)
+    note = (lead.raw or {}).get("leadflow_note")
+    if created and note:
+        from .contact import lofty_note  # contact imports nothing from here; local import avoids a cycle risk
+
+        lofty_note(db, services, lead, note)
     return True

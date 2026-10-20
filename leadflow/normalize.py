@@ -10,11 +10,17 @@ from typing import Any
 
 import phonenumbers
 
-# Canonical field -> accepted column names (compared lowercase, letters/digits only).
+# Canonical field -> accepted column names, compared lowercase with letters/digits only.
+# Within each list the first column present wins (e.g. "Property Type" beats "Land Use").
 FIELD_ALIASES: dict[str, list[str]] = {
     "owner_name": ["ownername", "owner1name", "owner1fullname", "ownerfullname", "owner", "fullname", "name"],
-    "first_name": ["firstname", "owner1firstname", "ownerfirstname"],
-    "last_name": ["lastname", "owner1lastname", "ownerlastname"],
+    "owner_first": ["owner1firstname", "ownerfirstname"],
+    "owner_last": ["owner1lastname", "ownerlastname"],
+    # The person a skip trace matched to the phones/emails (Propwire "Name 1").
+    "contact_name": ["name1", "contactname", "skiptracename"],
+    "first_name": ["firstname", "contactfirstname"],
+    "last_name": ["lastname", "contactlastname"],
+    "owner_type": ["ownertype"],
     "property_address": [
         "propertyaddress", "address", "streetaddress", "siteaddress", "situsaddress",
         "propertystreetaddress", "propertystreet",
@@ -22,8 +28,11 @@ FIELD_ALIASES: dict[str, list[str]] = {
     "city": ["city", "propertycity", "sitecity"],
     "state": ["state", "propertystate", "sitestate"],
     "zip_code": ["zip", "zipcode", "propertyzip", "propertyzipcode", "sitezip", "postalcode"],
-    "property_type": ["propertytype", "type", "landuse", "propertyusetype", "usetype"],
-    "mailing_address": ["mailingaddress", "owneraddress", "mailaddress", "ownermailingaddress"],
+    "property_type": ["propertytype", "propertyusetype", "usetype", "propertyuse", "landuse", "type"],
+    "mailing_address": ["ownermailingaddress", "mailingaddress", "owneraddress", "mailaddress"],
+    "mailing_city": ["ownermailingcity", "mailingcity", "mailcity"],
+    "mailing_state": ["ownermailingstate", "mailingstate", "mailstate"],
+    "mailing_zip": ["ownermailingzip", "mailingzip", "mailzip"],
     "email": ["email", "email1", "owneremail", "emailaddress"],
     "phone1": [
         "phone", "phone1", "phonenumber", "phonenumber1", "phone1number", "ownerphone",
@@ -31,18 +40,36 @@ FIELD_ALIASES: dict[str, list[str]] = {
     ],
     "phone2": ["phone2", "phonenumber2", "phone2number", "wireless2"],
     "phone3": ["phone3", "phonenumber3", "phone3number", "wireless3"],
-    "external_id": ["id", "propertyid", "apn", "parcelid", "leadid", "externalid"],
+    "phone1_type": ["phone1type", "phonetype1"],
+    "phone2_type": ["phone2type", "phonetype2"],
+    "phone3_type": ["phone3type", "phonetype3"],
+    # Do Not Call flags per phone (Propwire: "Do Not 1 Call" = "dnc").
+    "phone1_dnc": ["donot1call", "phone1dnc", "dnc1", "phone1donotcall"],
+    "phone2_dnc": ["donot2call", "phone2dnc", "dnc2", "phone2donotcall"],
+    "phone3_dnc": ["donot3call", "phone3dnc", "dnc3", "phone3donotcall"],
+    # Known TCPA litigator (Propwire: "Litigator" = "tcpa").
+    "litigator": ["litigator", "tcpalitigator"],
+    "external_id": ["apn", "parcelid", "propertyid", "leadid", "externalid", "id"],
     "language": ["language", "preferredlanguage", "idioma"],
+    "property_url": ["propertyurl"],
+    "bedrooms": ["bedrooms", "beds"],
+    "bathrooms": ["bathrooms", "baths"],
+    "living_sqft": ["livingsquarefeet", "squarefeet", "sqft"],
+    "year_built": ["yearbuilt"],
+    "ownership_months": ["ownershiplengthmonths"],
+    "vacant": ["vacant"],
 }
 
-_ALIAS_LOOKUP = {alias: field for field, aliases in FIELD_ALIASES.items() for alias in aliases}
-
 COMPANY_RE = re.compile(
-    r"\b(LLC|L\.?L\.?C|INC|INCORPORATED|CORP|CORPORATION|COMPANY|LP|LLP|LTD|TRUST|BANK|"
-    r"ASSOCIATION|ASSN|HOLDINGS|PROPERTIES|INVESTMENTS?|PARTNERS|GROUP|CHURCH|ESTATE OF|"
-    r"CITY OF|COUNTY OF|HOA)\b",
+    r"\b(LLC|L\.?L\.?C|INC|INCORPORATED|CORP|CORPORATION|COMPANY|LP|LLP|LTD|BANK|ASSOCIATION|ASSN|"
+    r"HOLDINGS|PROPERTIES|INVESTMENTS?|PARTNERS|GROUP|CHURCH|CITY OF|COUNTY OF|HOA)\b",
     re.IGNORECASE,
 )
+# Family/living trusts and estates: owned by people, but the name is not a person's name.
+TRUST_RE = re.compile(r"\b(TRUST|TR|TRS|TRUSTEES?|REVOCABLE|IRREVOCABLE|ESTATE OF|LIVING)\b", re.IGNORECASE)
+
+TRUE_FLAGS = {"dnc", "yes", "y", "true", "1", "x"}
+FALSE_FLAGS = {"", "no", "n", "false", "0"}
 
 # Checked in order: the more specific types come before the generic "residential".
 PROPERTY_TYPES = [
@@ -162,47 +189,116 @@ def make_dedupe_key(address: str | None, zip_code: str | None, owner: str | None
     return f"{address_key(address)}|{zip_code or ''}|{name_key(owner)}"
 
 
+def clean_number(value: Any, thousands: bool = False) -> str | None:
+    """Propwire exports numbers like "3.000000000"; show 3, 2.5, 1,208. Zero or negative = unknown."""
+    text = clean_text(value)
+    if not text:
+        return None
+    try:
+        number = float(text.replace(",", ""))
+    except ValueError:
+        return text
+    if number <= 0:
+        return None
+    if number.is_integer():
+        return f"{int(number):,}" if thousands else str(int(number))
+    return f"{number:g}"
+
+
+def is_flag(value: Any) -> bool:
+    return str(value or "").strip().lower() in TRUE_FLAGS
+
+
+def is_litigator(value: Any) -> bool:
+    """Any marker other than an explicit no (Propwire writes "tcpa")."""
+    return str(value or "").strip().lower() not in FALSE_FLAGS
+
+
+def normalize_line_type(raw: Any) -> str | None:
+    text = re.sub(r"[^a-z]", "", str(raw or "").lower())
+    if text in ("mobile", "cell", "cellular", "wireless"):
+        return "mobile"
+    if text in ("landline", "land", "fixed", "residential"):
+        return "landline"
+    if "voip" in text:
+        return "nonFixedVoip"
+    return None
+
+
+def is_company_type(owner_type: str) -> bool:
+    """Owner Type like "BANK,COMPANY" (no individual or trust behind it)."""
+    types = {t.strip() for t in owner_type.upper().split(",") if t.strip()}
+    return bool(types & {"COMPANY", "BANK"}) and not types & {"INDIVIDUAL", "TRUST"}
+
+
 def map_row(row: dict[str, Any]) -> dict[str, Any]:
-    """Map arbitrary column names onto canonical field names (first match wins)."""
-    mapped: dict[str, Any] = {}
+    """Map arbitrary column names onto canonical field names, by alias priority."""
+    by_key: dict[str, Any] = {}
     for key, value in row.items():
-        if key is None:
+        if key is None or value is None or (isinstance(value, str) and not value.strip()):
             continue
-        canonical = key if key in FIELD_ALIASES or key == "phones" else _ALIAS_LOOKUP.get(header_key(key))
-        if canonical and canonical not in mapped and value not in (None, ""):
-            mapped[canonical] = value
+        by_key.setdefault(header_key(str(key)), value)
+    mapped: dict[str, Any] = {}
+    for field, aliases in FIELD_ALIASES.items():
+        for alias in aliases:
+            if alias in by_key:
+                mapped[field] = by_key[alias]
+                break
+    if isinstance(row.get("phones"), list):
+        mapped["phones"] = row["phones"]
     return mapped
 
 
+def _join(*parts: str | None) -> str | None:
+    return " ".join(p for p in parts if p) or None
+
+
 def canonicalize(row: dict[str, Any]) -> dict[str, Any]:
-    """Return a clean lead dict: names split, phones in E.164, address tidy, dedupe key."""
+    """Return a clean lead dict: owner and contact names, phones in E.164 with their
+    type and Do Not Call flag, tidy address, details for the CRM note, dedupe key."""
     m = map_row(row)
 
+    owner_first = smart_title(clean_text(m.get("owner_first")))
+    owner_last = smart_title(clean_text(m.get("owner_last")))
     first = smart_title(clean_text(m.get("first_name")))
     last = smart_title(clean_text(m.get("last_name")))
-    owner = smart_title(clean_text(m.get("owner_name")))
-    if not owner and (first or last):
-        owner = " ".join(p for p in (first, last) if p)
-    company = is_company_name(owner)
-    if owner and not company and not (first or last):
+    owner = smart_title(clean_text(m.get("owner_name"))) or _join(owner_first, owner_last) or _join(first, last)
+    owner_type = (clean_text(m.get("owner_type")) or "").upper()
+    company = is_company_name(owner) or is_company_type(owner_type)
+    entity = company or bool(owner and TRUST_RE.search(owner))
+
+    # Who we greet: the skip-traced contact, else explicit first/last, else the owner if a person.
+    contact = smart_title(clean_text(m.get("contact_name")))
+    if contact:
+        first, last = split_name(contact)
+    elif first or last:
+        pass
+    elif owner_first and not entity:
+        first, last = owner_first, owner_last
+    elif owner and not entity:
         first, last = split_name(owner)
-    if company:
+    else:
         first = last = None
 
-    raw_phones: list[Any] = []
+    entries: list[tuple[Any, Any, Any]] = []
     if isinstance(m.get("phones"), list):
-        raw_phones.extend(m["phones"])
-    raw_phones.extend(m.get(k) for k in ("phone1", "phone2", "phone3"))
+        entries.extend((p, None, None) for p in m["phones"])
+    entries.extend((m.get(f"phone{i}"), m.get(f"phone{i}_type"), m.get(f"phone{i}_dnc")) for i in (1, 2, 3))
     phones: list[str] = []
+    phone_meta: dict[str, dict[str, Any]] = {}
     invalid_phones: list[str] = []
-    for raw in raw_phones:
+    for raw, line_type, dnc_flag in entries:
         if raw in (None, ""):
             continue
         number = normalize_phone(raw)
-        if number and number not in phones:
-            phones.append(number)
-        elif not number:
+        if not number:
             invalid_phones.append(str(raw))
+            continue
+        if number in phone_meta:  # same number listed twice: keep the strictest flag
+            phone_meta[number]["dnc"] = phone_meta[number]["dnc"] or is_flag(dnc_flag)
+            continue
+        phone_meta[number] = {"type": normalize_line_type(line_type), "dnc": is_flag(dnc_flag)}
+        phones.append(number)
 
     language = (clean_text(m.get("language")) or "en").lower()
     language = "es" if language.startswith(("es", "sp")) else "en"
@@ -210,23 +306,43 @@ def canonicalize(row: dict[str, Any]) -> dict[str, Any]:
     address = smart_title(clean_text(m.get("property_address")))
     zip_code = normalize_zip(m.get("zip_code"))
     state = clean_text(m.get("state"))
+    mailing = smart_title(clean_text(m.get("mailing_address")))
+    mailing_city = smart_title(clean_text(m.get("mailing_city")))
+    if mailing and mailing_city:
+        mailing_state = (clean_text(m.get("mailing_state")) or "").upper()
+        mailing = f"{mailing}, {mailing_city}, {_join(mailing_state, normalize_zip(m.get('mailing_zip')))}".rstrip(", ")
 
     return {
         "external_id": clean_text(m.get("external_id")),
         "owner_name": owner,
+        "owner_type": owner_type or None,
+        "contact_name": contact,
         "first_name": first,
         "last_name": last,
         "is_company": company,
         "email": normalize_email(m.get("email")),
         "phones": phones,
+        "phone_meta": phone_meta,
+        "dnc_phones": [n for n in phones if phone_meta[n]["dnc"]],
         "invalid_phones": invalid_phones,
+        "litigator": is_litigator(m.get("litigator")),
         "property_address": address,
         "city": smart_title(clean_text(m.get("city"))),
         "state": state.upper() if state and len(state) <= 3 else state,
         "zip_code": zip_code,
         "property_type": normalize_property_type(m.get("property_type")),
-        "mailing_address": smart_title(clean_text(m.get("mailing_address"))),
+        "mailing_address": mailing,
         "language": language,
+        "details": {
+            "property_type": clean_text(m.get("property_type")),
+            "bedrooms": clean_number(m.get("bedrooms")),
+            "bathrooms": clean_number(m.get("bathrooms")),
+            "living_sqft": clean_number(m.get("living_sqft"), thousands=True),
+            "year_built": clean_number(m.get("year_built")),
+            "ownership_months": clean_number(m.get("ownership_months")),
+            "vacant": is_flag(m.get("vacant")),
+            "property_url": clean_text(m.get("property_url")),
+        },
         "dedupe_key": make_dedupe_key(address, zip_code, owner),
     }
 
