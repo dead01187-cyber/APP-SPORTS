@@ -1,0 +1,29 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: leadflow
+      POSTGRES_PASSWORD: leadflow
+      POSTGRES_DB: leadflow
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U leadflow"]
+      interval: 5s
+      retries: 10
+
+  app:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://leadflow:leadflow@db:5432/leadflow
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./rules.yaml:/app/rules.yaml:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

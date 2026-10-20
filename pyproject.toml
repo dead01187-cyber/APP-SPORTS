@@ -1,0 +1,9 @@
+[project]
+name = "leadflow"
+version = "0.1.0"
+description = "Real-estate lead automation: Propwire -> BeenVerified -> Lofty, SMS outreach classified by Claude, CMA delivery."
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
