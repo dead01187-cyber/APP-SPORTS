@@ -175,3 +175,25 @@ def test_reconcile_requeues_unsynced_leads_and_stuck_jobs(db, services, make_lea
     result = reconcile(db, now=DAYTIME + timedelta(days=1))
     assert result["stale_jobs_reset"] == 1
     assert result["lofty_requeued"] == 1
+
+
+def test_default_manual_cma_sends_alert_with_signed_form_link(db, services, make_lead):
+    services.rules.cma.lofty_api = False
+    services.settings.public_base_url = "https://leadflow.example"
+    lead = hot_seller(db, services, make_lead)
+    run_due_jobs(db, services, now=DAYTIME)
+    assert services.lofty.cma_requests == 0  # Lofty is not called
+    alert = services.alerts.sent[-1]
+    assert alert.startswith("CMA pendiente: John Smith")
+    assert f"https://leadflow.example/cma/{lead.id}/form?t=" in alert
+    assert reviews(db, "cma_manual")[0].payload["form"] in alert
+
+
+def test_rules_file_defaults_to_manual_cma():
+    from leadflow.rules import load_rules
+
+    from .conftest import ROOT
+
+    rules = load_rules(ROOT / "rules.yaml")
+    assert rules.cma.lofty_api is False
+    assert rules.lofty.lead_types == [1]

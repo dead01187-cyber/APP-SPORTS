@@ -154,7 +154,7 @@ def settings(database_url: str) -> Settings:
 
 @pytest.fixture
 def services(settings: Settings) -> Services:
-    return Services(
+    services = Services(
         settings=settings,
         rules=load_rules(ROOT / "rules.yaml"),
         lofty=FakeLofty(),
@@ -163,6 +163,9 @@ def services(settings: Settings) -> Services:
         classifier=FakeClassifier(),
         alerts=FakeAlerts(),
     )
+    # Most tests simulate an account with a CMA API; test_jobs_cma covers the manual default.
+    services.rules.cma.lofty_api = True
+    return services
 
 
 @pytest.fixture

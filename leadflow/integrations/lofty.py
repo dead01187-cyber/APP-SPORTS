@@ -2,15 +2,19 @@
 
 Base URL https://api.lofty.com/v1.0, auth `Authorization: Bearer <key>`.
 
-Checked against a live Lofty account (read-only, Oct 2026):
-- GET /leads returns leadId, firstName, lastName, emails[], phones[] (10 digits),
-  source, tags, streetAddress/city/state/zipCode, leadPropertyList[], pondId,
-  ownershipScope, leadTypes[], cannotText, cannotCall.
-- /notes exists and takes leadId; /leads/{id}/notes and /ponds do not exist.
-Still unverified (writes were not tested): the note body field name, the exact
-write format of tags/leadPropertyList, and the CMA endpoint. If your plan does not
-expose CMA creation through the API, create_cma() fails with a non-retryable error
-and the lead goes to the manual review queue ("cma_manual").
+Tested against the live Lofty account (Oct 2026, with a test lead that was then deleted):
+- POST /leads -> {"leadId": ...}. Saved: firstName, lastName, emails[], phones[]
+  (10 digits), tags (list of names), streetAddress/city/state/zipCode, cannotText,
+  cannotCall, leadTypes (1 = Seller).
+- `source` only keeps names from Lofty's own source list; anything else becomes
+  "Other". The "Propwire" tag is the reliable marker.
+- Leads are assigned to the owner of the API key as PERSONAL unless pondId or
+  assignedUserId is sent.
+- PUT /leads/{id} updates tags and the cannotText/cannotCall flags. It answers
+  HTTP 200 with {"status": {"code": 0}}; a non-zero code is an error.
+- POST /notes {"leadId", "content"} -> {"noteId": ...}.
+- There is no CMA endpoint (/cma is 404). With cma.lofty_api: false (default)
+  CMAs are made by hand and the link is sent through /cma/{id}/form.
 """
 
 from __future__ import annotations
@@ -62,14 +66,6 @@ class LoftyClient(HttpService):
             "city": lead.city,
             "state": lead.state,
             "zipCode": lead.zip_code,
-            "leadPropertyList": [{
-                "streetAddress": lead.property_address,
-                "city": lead.city,
-                "state": lead.state,
-                "zipCode": lead.zip_code,
-                "propertyType": lead.property_type or "",
-                "label": "Home",
-            }],
             # "Call & Text: Yes" for new leads; switched off when the person opts out.
             "cannotText": blocked,
             "cannotCall": blocked,
@@ -91,10 +87,13 @@ class LoftyClient(HttpService):
         self._ensure("upsert_lead")
         payload = self.lead_payload(lead, rules)
         if lead.lofty_lead_id:
-            self._request(
+            data = self._request(
                 "update_lead", "PUT", self._url("lead", lead_id=lead.lofty_lead_id),
                 json=payload, headers=self._headers(),
             )
+            status = data.get("status") if isinstance(data, dict) else None
+            if isinstance(status, dict) and status.get("code") not in (0, None):
+                raise IntegrationError(self.service, "update_lead", f"Lofty error: {status}", retryable=False)
             return lead.lofty_lead_id
         data = self._request("create_lead", "POST", self._url("create_lead"), json=payload, headers=self._headers())
         lofty_id = _find_id(data, "leadId", "id")

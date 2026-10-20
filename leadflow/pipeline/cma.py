@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from ..integrations.base import IntegrationError
 from ..models import Cma, Lead, LeadStatus
 from ..monitoring import enqueue_job, log_event, open_review, resolve_reviews, retry_delay
+from ..security import cma_form_url
 from ..timeutil import utcnow
 from .contact import lofty_note, next_send_time, render, send_to_first_usable, send_window_open, usable_phone
 
@@ -68,21 +69,15 @@ def run_for_lead(db: Session, services: Services, lead: Lead, now: datetime | No
     reason = eligibility(db, services, lead)
     if reason:
         return {"lead_id": lead.id, "skipped": reason}
+    if not services.rules.cma.lofty_api:
+        return manual(db, services, lead, "CMA is made by hand (no Lofty CMA API)")
 
     try:
         result = services.lofty.create_cma(lead, services.rules.cma)
     except IntegrationError as exc:
         if exc.retryable:
             raise
-        db.add(Cma(lead_id=lead.id, status="manual_pending"))
-        open_review(
-            db, "cma_manual",
-            f"Create a CMA in Lofty for {lead.property_address} ({services.rules.cma.radius_miles} mi radius), "
-            f"then send the link to POST /cma/{lead.id}/link",
-            lead.id, {"error": exc.message},
-        )
-        log_event(db, "cma_manual", lead.id, error=exc.message)
-        return {"lead_id": lead.id, "manual": True, "reason": exc.message}
+        return manual(db, services, lead, exc.message)
 
     cma = Cma(
         lead_id=lead.id, lofty_cma_id=str(result.get("id") or "") or None, url=result.get("url"),
@@ -98,6 +93,25 @@ def run_for_lead(db: Session, services: Services, lead: Lead, now: datetime | No
         return {"lead_id": lead.id, "needs_review": problems}
     db.flush()
     return deliver(db, services, lead, cma, now)
+
+
+def manual(db: Session, services: Services, lead: Lead, reason: str) -> dict[str, Any]:
+    """Ask the agent for the CMA: review item + alert with a signed link to paste it."""
+    db.add(Cma(lead_id=lead.id, status="manual_pending"))
+    radius = services.rules.cma.radius_miles
+    form = cma_form_url(services.settings, lead.id)
+    where = form or f"POST /cma/{lead.id}/link"
+    open_review(
+        db, "cma_manual",
+        f"Create a CMA in Lofty for {lead.property_address} ({radius} mi radius), then send the link: {where}",
+        lead.id, {"reason": reason, "form": form},
+    )
+    services.alerts.send(
+        f"CMA pendiente: {lead.owner_name}, {lead.property_address}. Hágalo en Lofty ({radius:g} millas) "
+        f"y pegue el link aquí para enviarlo por SMS: {where}"
+    )
+    log_event(db, "cma_manual", lead.id, reason=reason)
+    return {"lead_id": lead.id, "manual": True, "reason": reason, "form": form}
 
 
 def deliver(db: Session, services: Services, lead: Lead, cma: Cma, now: datetime | None = None) -> dict[str, Any]:

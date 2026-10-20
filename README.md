@@ -35,7 +35,7 @@ Propwire (CSV) ──► 1 · Prospección ──► Lofty (leads limpios, etiqu
 
 | Claude clasifica | Estado | Siguiente paso (configurable en `rules.yaml`) |
 |---|---|---|
-| Interested (Selling) | Hot | Crea y envía el CMA automáticamente + alerta al agente |
+| Interested (Selling) | Hot | Alerta al agente con un link para pegar el CMA; el sistema lo envía por SMS |
 | Interested (Buying) | Hot | Alerta al agente + cola de revisión |
 | Question | Warm | Cola de revisión con la respuesta sugerida por Claude |
 | Future Follow-up | Follow-up | Programa seguimiento (fecha que dio la persona, o 6 meses) |
@@ -117,7 +117,7 @@ Todos piden el encabezado `X-API-Key`, salvo `/health` (y los webhooks firmados 
 ## Pruebas
 
 ```bash
-pytest                                   # 65 pruebas, SQLite en memoria
+pytest                                   # 70 pruebas, SQLite en memoria
 TEST_DATABASE_URL=postgresql+psycopg://usuario@localhost/leadflow_test pytest   # mismas pruebas en PostgreSQL
 ```
 
@@ -127,12 +127,16 @@ Las pruebas reemplazan Lofty, Twilio, BeenVerified y Claude por versiones falsas
 
 Estos puntos están marcados como *Pending setup* en el diagrama o dependen de su cuenta:
 
-1. **API de Lofty.** El formato de leads se revisó contra la cuenta real (solo lectura): campos,
-   teléfonos de 10 dígitos, `pondId`, `cannotText`/`cannotCall`, y la ruta `/notes`.
-   Falta probar una escritura real (crear un lead de prueba) antes de activar `DRY_RUN=false`.
-   En `rules.yaml` → `lofty`, ponga el `pond_id` del pond "Daniel R-N" y, si quiere, el número de tipo "Seller".
-2. **CMA por API.** Si su plan de Lofty no permite crear CMAs por API, el sistema
-   lo detecta, pone el lead en la cola de revisión (`cma_manual`) y usted envía el link con `POST /cma/{id}/link`.
+1. **API de Lofty (probada).** Se creó, actualizó y borró un lead de prueba en su cuenta: nombre, emails,
+   teléfonos, dirección, etiquetas, tipo Seller (`1`), notas y "no textear / no llamar" funcionan.
+   - El campo *source* solo acepta fuentes de la lista de Lofty (si no, queda "Other"); la etiqueta
+     "Propwire" sí se guarda.
+   - Sin `pond_id`, Lofty asigna cada lead al dueño de la clave API como *Personal*. Ponga en `rules.yaml`
+     → `lofty` → `pond_id` el número del pond "Daniel R-N".
+   - "Level: Company" no está disponible para la cuenta conectada (solo *Personal*).
+2. **CMA.** Lofty no tiene API de CMA en su cuenta. Cuando alguien quiere vender, llega una alerta con un
+   link seguro: abre una página, pega el link del CMA hecho en Lofty y el sistema lo envía por SMS,
+   lo anota en Lofty y programa la llamada.
 3. **BeenVerified.** No tiene una API pública estándar. El cliente envía nombre + dirección a
    `BEENVERIFIED_API_URL`; ajuste `parse_response()` a la respuesta de su cuenta, o déjelo vacío y el paso se omite.
 4. **Propwire** entra por CSV exportado (o filas enviadas desde Zapier). Las columnas se reconocen por nombre

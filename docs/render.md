@@ -43,7 +43,8 @@ Twilio → *Messaging → Regulatory Compliance*.
 En `rules.yaml` → `lofty`:
 
 - `pond_id`: el número del pond "Daniel R-N" (Lofty lo pide como número, no como nombre).
-- `lead_types`: el número del tipo "Seller", cuando lo confirme.
+  Sin él, cada lead queda asignado como *Personal* al dueño de la clave API de Lofty.
+- `lead_types: [1]` ya marca los leads como **Seller** (verificado en su cuenta).
 
 Cada cambio en GitHub vuelve a desplegar el servidor automáticamente.
 

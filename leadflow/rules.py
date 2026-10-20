@@ -106,6 +106,8 @@ class FollowUpRules(BaseModel):
 
 class CmaRules(BaseModel):
     auto_run: bool = True
+    # Lofty has no CMA endpoint on this account: make the CMA by hand and send the link.
+    lofty_api: bool = False
     radius_miles: float = 5
     max_cost: float = 0
     min_comps: int = 3

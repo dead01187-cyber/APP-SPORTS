@@ -4,6 +4,7 @@ the JSON responses to route the next step. Run: uvicorn leadflow.api:app"""
 from __future__ import annotations
 
 import hmac
+import html
 import logging
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
@@ -11,7 +12,7 @@ from typing import Any, Literal
 from urllib.parse import parse_qsl
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import Response
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 from starlette.datastructures import UploadFile
 from sqlalchemy import select
@@ -27,6 +28,7 @@ from .pipeline import cma as cma_step
 from .pipeline import contact
 from .pipeline.prospecting import ingest_rows
 from .scheduler import SchedulerThread
+from .security import check_cma_token
 from .services import Services, build_services
 from .timeutil import utcnow
 
@@ -267,6 +269,49 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         result = cma_step.submit_link(db, svc, lead, body.url)
         db.commit()
         return result
+
+    def page(title: str, body: str) -> HTMLResponse:
+        return HTMLResponse(
+            f"""<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>{html.escape(title)}</title>
+<style>body{{font-family:system-ui,sans-serif;max-width:32rem;margin:2rem auto;padding:0 1rem;line-height:1.5}}
+input{{width:100%;padding:.6rem;font-size:1rem;box-sizing:border-box}}
+button{{margin-top:.8rem;padding:.6rem 1.2rem;font-size:1rem}}</style></head>
+<body><h1>{html.escape(title)}</h1>{body}</body></html>"""
+        )
+
+    def form_lead(lead_id: int, token: str | None, db: Session) -> Lead:
+        if not check_cma_token(settings, lead_id, token):
+            raise HTTPException(403, "invalid link")
+        lead = db.get(Lead, lead_id)
+        if lead is None:
+            raise HTTPException(404, "lead not found")
+        return lead
+
+    @app.get("/cma/{lead_id}/form", response_class=HTMLResponse)
+    def cma_form(lead_id: int, t: str | None = None, db: Session = Depends(get_db)) -> HTMLResponse:
+        lead = form_lead(lead_id, t, db)
+        return page("Enviar CMA", f"""
+<p><strong>{html.escape(lead.owner_name)}</strong><br>{html.escape(lead.property_address)}</p>
+<form method="post"><input type="hidden" name="t" value="{html.escape(t or '')}">
+<label>Link del CMA<br><input name="url" type="url" required placeholder="https://..."></label>
+<button type="submit">Enviar por SMS</button></form>""")
+
+    @app.post("/cma/{lead_id}/form", response_class=HTMLResponse)
+    async def cma_form_submit(lead_id: int, request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+        form = await request.form()
+        token, url = str(form.get("t") or ""), str(form.get("url") or "").strip()
+        lead = form_lead(lead_id, token, db)
+        if not url.startswith(("https://", "http://")):
+            return page("Link no válido", "<p>El link debe empezar con https://</p>")
+        result = cma_step.submit_link(db, svc, lead, url)
+        db.commit()
+        if result.get("sent"):
+            return page("CMA enviado", f"<p>Se envió por SMS a {html.escape(lead.owner_name)}. "
+                                       "La llamada de seguimiento quedó programada.</p>")
+        if result.get("scheduled_for"):
+            return page("CMA programado", "<p>Es fuera del horario permitido; se enviará al abrir el horario.</p>")
+        return page("No se pudo enviar", f"<p>{html.escape(str(result))}</p>")
 
     # ---------------------------------------------------------- jobs, monitoring, review queue
 

@@ -14,17 +14,18 @@ prospecting:
 
 # Cómo se importa cada lead a Lofty
 lofty:
-  source: Propwire
-  tags: [Propwire]
+  source: Propwire             # Lofty solo guarda fuentes de su propia lista; si no existe queda "Other"
+  tags: [Propwire]             # la etiqueta sí se guarda siempre
   pond_name: "Daniel R-N"
   # Lofty asigna el pond por número. Ábralo en Lofty y copie el número (pondId).
   pond_id: null
-  # Tipo de lead. En la cuenta revisada, 1 = Buyer. Confirme el número de "Seller" antes de usarlo.
-  lead_types: []
+  # Tipo de lead: 1 = Seller (verificado en su cuenta).
+  lead_types: [1]
   # Nivel de propiedad del lead (Level). La cuenta conectada en Zapier solo ofrece Personal.
   ownership_scope: null        # PERSONAL | TEAM | COMPANY
   call_and_text: true          # Call & Text: Yes
-  assigned_user_id: null       # null = queda en el pond
+  # Sin pond_id ni assigned_user_id, Lofty asigna el lead al dueño de la clave API (Personal).
+  assigned_user_id: null
 
 # 2 · Contacto
 contact:
@@ -67,6 +68,8 @@ follow_up:
 # 3 · CMA para leads calientes
 cma:
   auto_run: true           # crear el CMA en cuanto alguien responde que quiere vender
+  lofty_api: false         # su cuenta de Lofty no tiene API de CMA: llega una alerta con un link
+                           # para pegar el CMA hecho a mano, y el sistema lo envía por SMS
   radius_miles: 5
   max_cost: 0              # costo 0 (si está disponible)
   min_comps: 3             # validar resultados: mínimo de comparables

@@ -140,3 +140,78 @@ def test_csv_upload_as_multipart_file_and_excel_guard(client):
 
     xlsx = client.post("/prospecting/import-csv", content=b"PK\x03\x04junk", headers=KEY)
     assert xlsx.status_code == 422 and "CSV" in xlsx.json()["detail"]
+
+
+def test_cma_form_from_the_alert_link(client, services, settings):
+    from leadflow.security import cma_token
+
+    services.rules.cma.lofty_api = False
+    client.post("/prospecting/import-csv", content=CSV, headers=KEY)
+    client.post("/contact/campaign", json={}, headers=KEY)
+    services.classifier.will_return("interested_selling")
+    client.post("/webhooks/sms/inbound", json={"from": "+12134821234", "body": "Yes"}, headers=KEY)
+    client.post("/jobs/run-due", headers=KEY)
+
+    token = cma_token(settings, 1)
+    assert client.get("/cma/1/form?t=wrong").status_code == 403
+    form = client.get(f"/cma/1/form?t={token}")
+    assert form.status_code == 200 and "John Smith" in form.text and "123 Main Street" in form.text
+
+    bad = client.post("/cma/1/form", data={"t": token, "url": "javascript:alert(1)"})
+    assert "Link no válido" in bad.text
+    sent = client.post("/cma/1/form", data={"t": token, "url": "https://lofty.example/cma/abc"})
+    assert "CMA enviado" in sent.text
+    assert "https://lofty.example/cma/abc" in services.sms.sent[-1][1]
+    assert client.get("/review?kind=cma_manual", headers=KEY).json() == []
+
+
+def test_lofty_update_error_inside_http_200_is_raised(settings):
+    import httpx
+
+    from leadflow.integrations.base import IntegrationError
+    from leadflow.integrations.lofty import LoftyClient
+    from leadflow.models import Lead
+    from leadflow.rules import LoftyRules
+
+    def handler(request):
+        return httpx.Response(200, json={"status": {"code": 20001, "msg": "bad tags"}})
+
+    settings.lofty_api_key = "key"
+    client = LoftyClient(settings, httpx.Client(transport=httpx.MockTransport(handler)))
+    lead = Lead(id=1, owner_name="A", property_address="1 A St", lofty_lead_id="123", tags=[], phones=[])
+    with pytest.raises(IntegrationError) as exc:
+        client.upsert_lead(lead, LoftyRules())
+    assert exc.value.retryable is False and "bad tags" in str(exc.value)
+
+
+def test_lofty_requests_match_the_verified_api(settings):
+    import json as jsonlib
+
+    import httpx
+
+    from leadflow.integrations.lofty import LoftyClient
+    from leadflow.models import Lead, LeadPhone
+    from leadflow.rules import LoftyRules
+
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        if request.url.path == "/v1.0/leads":
+            return httpx.Response(200, json={"leadId": 1149664767691142})
+        return httpx.Response(200, json={"noteId": 1})
+
+    settings.lofty_api_key = "key"
+    client = LoftyClient(settings, httpx.Client(transport=httpx.MockTransport(handler)))
+    lead = Lead(id=1, owner_name="John Smith", first_name="John", last_name="Smith", property_address="1 A St",
+                tags=["Propwire"], phones=[LeadPhone(number="+12134821234", status="valid")])
+    lofty_id = client.upsert_lead(lead, LoftyRules(lead_types=[1]))
+    client.add_note(lofty_id, "hello")
+
+    assert lofty_id == "1149664767691142"
+    create, note = seen
+    assert create.headers["authorization"] == "Bearer key"
+    body = jsonlib.loads(create.content)
+    assert body["phones"] == ["2134821234"] and body["leadTypes"] == [1] and body["tags"] == ["Propwire"]
+    assert str(note.url) == "https://api.lofty.com/v1.0/notes"
+    assert jsonlib.loads(note.content) == {"leadId": 1149664767691142, "content": "hello"}

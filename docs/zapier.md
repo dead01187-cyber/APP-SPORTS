@@ -38,6 +38,7 @@ Exporte siempre en **CSV** (no Excel). Si sube un Excel, el servidor responde co
 
 Llegan alertas cuando:
 - alguien responde que quiere vender o comprar;
+- hay que hacer un CMA: la alerta trae un link; ábralo, pegue el link del CMA de Lofty y se envía solo por SMS;
 - una API falla y necesita atención;
 - el lunes a las 8:00, con el reporte semanal (importados, contactados, tasa de respuesta,
   CMAs enviados, oportunidades Hot, errores).
